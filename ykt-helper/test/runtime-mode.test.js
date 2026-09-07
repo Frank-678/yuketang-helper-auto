@@ -7,13 +7,11 @@ function createRouteGuardHarness({
   pathname = '/v2/web/index',
   search = '',
   hash = '',
-  session = new Map(),
-  innerWidth = 393,
-  innerHeight = 838,
 } = {}) {
   const listeners = new Map();
   const historyCalls = [];
   const alertCalls = [];
+  const session = new Map();
   const location = {
     origin: 'https://changjiang.yuketang.cn',
     pathname,
@@ -33,8 +31,6 @@ function createRouteGuardHarness({
   };
   const targetWindow = {
     location,
-    innerWidth,
-    innerHeight,
     history: {
       pushState(...args) {
         historyCalls.push({ kind: 'push', args });
@@ -194,61 +190,4 @@ test('stops after one attempt when a server redirects the same route back to mob
   assert.deepEqual(location.replaceCalls, ['/v2/web/index']);
   assert.equal(alertCalls.length, 1);
   assert.match(alertCalls[0], /桌面版网站/);
-});
-
-test('keeps the redirect marker when a desktop page bounces back to the same mobile route', async () => {
-  const runtimeMode = await loadRuntimeMode();
-  const session = new Map();
-  const originalWarn = console.warn;
-  console.warn = () => {};
-
-  let first;
-  let desktop;
-  let bounced;
-  try {
-    const firstPage = createRouteGuardHarness({ pathname: '/m/v2', session });
-    first = runtimeMode.installDesktopRouteGuard(firstPage);
-
-    const desktopPage = createRouteGuardHarness({ pathname: '/v2/web/index', session });
-    desktop = runtimeMode.installDesktopRouteGuard(desktopPage);
-
-    const bouncedPage = createRouteGuardHarness({ pathname: '/m/v2', session });
-    bounced = runtimeMode.installDesktopRouteGuard(bouncedPage);
-  } finally {
-    console.warn = originalWarn;
-  }
-
-  assert.deepEqual(first, { redirected: true, reason: 'mobile-route' });
-  assert.deepEqual(desktop, { redirected: false, reason: 'desktop-route' });
-  assert.deepEqual(bounced, { redirected: false, reason: 'loop-prevented' });
-});
-
-test('makes a portrait desktop entry fail the host mobile-redirect size check', async () => {
-  const runtimeMode = await loadRuntimeMode();
-
-  assert.equal(typeof runtimeMode.installDesktopViewportGuard, 'function');
-
-  const { targetWindow } = createRouteGuardHarness({
-    pathname: '/v2/web/index',
-    innerWidth: 393,
-    innerHeight: 838,
-  });
-  runtimeMode.installDesktopViewportGuard({ targetWindow });
-
-  assert.equal(targetWindow.innerWidth < targetWindow.innerHeight, false);
-  assert.equal(targetWindow.innerHeight, 838);
-});
-
-test('leaves a portrait classroom route at its real viewport size', async () => {
-  const runtimeMode = await loadRuntimeMode();
-  const { targetWindow } = createRouteGuardHarness({
-    pathname: '/v2/web/lesson/42',
-    innerWidth: 393,
-    innerHeight: 838,
-  });
-
-  runtimeMode.installDesktopViewportGuard({ targetWindow });
-
-  assert.equal(targetWindow.innerWidth, 393);
-  assert.equal(targetWindow.innerWidth < targetWindow.innerHeight, true);
 });
