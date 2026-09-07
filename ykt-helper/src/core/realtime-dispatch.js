@@ -3,8 +3,8 @@ import { getRealtimeEvent } from './publish-events.js';
 
 /**
  * Converts a raw realtime frame into an action call without coupling the
- * protocol parser to desktop-only behavior.  The same frame can therefore be
- * used by the /m/v2 reminder runtime without enabling auto-answer.
+ * protocol parser to the action layer.  The current userscript runs only the
+ * desktop runtime, while this option remains available for protocol tests.
  */
 export function dispatchRealtimeMessage(message, {
   getRuntimeMode = () => 'desktop',

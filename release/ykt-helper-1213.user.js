@@ -11,6 +11,10 @@
 // @match        https://www.yuketang.cn/m/v2*
 // @match        https://pro.yuketang.cn/m/v2*
 // @match        https://changjiang.yuketang.cn/m/v2*
+// @match        https://www.yuketang.cn/web
+// @match        https://pro.yuketang.cn/web
+// @match        https://changjiang.yuketang.cn/web
+// @match        https://www.yuketang.cn/web/*
 // @match        https://pro.yuketang.cn/web/*
 // @match        https://changjiang.yuketang.cn/web/*
 // @match        https://*.yuketang.cn/lesson/fullscreen/v3/*
@@ -557,8 +561,8 @@
     return Object.fromEntries(REMINDER_SETTING_KEYS.map(key => [ key, !!fields[key]?.checked ]));
   }
   // settings.js (new version)
-    let mounted$6 = false;
-  let root$5;
+    let mounted$5 = false;
+  let root$4;
   let syncMountedForm = () => {};
   // ---- AI Profile helpers ----
     function ensureAIProfiles(configAI) {
@@ -581,60 +585,60 @@
   }
   // ------------------------------
     function mountSettingsPanel() {
-    if (mounted$6) return root$5;
+    if (mounted$5) return root$4;
     // 注入 HTML
-        root$5 = document.createElement("div");
-    root$5.innerHTML = tpl$5;
-    document.body.appendChild(root$5.firstElementChild);
-    root$5 = document.getElementById("ykt-settings-panel");
+        root$4 = document.createElement("div");
+    root$4.innerHTML = tpl$5;
+    document.body.appendChild(root$4.firstElementChild);
+    root$4 = document.getElementById("ykt-settings-panel");
     const aiCfg = ui.config.ai || (ui.config.ai = {});
     ensureAIProfiles(aiCfg);
     // === 获取所有 AI Profile 相关的 DOM ===
-        const $profileSelect = root$5.querySelector("#ykt-ai-profile-select");
-    const $profileAdd = root$5.querySelector("#ykt-ai-profile-add");
-    const $profileDel = root$5.querySelector("#ykt-ai-profile-del");
-    const $profileName = root$5.querySelector("#ykt-ai-profile-name");
-    const $baseUrl = root$5.querySelector("#ykt-ai-base-url");
-    const $api = root$5.querySelector("#kimi-api-key");
-    const $model = root$5.querySelector("#ykt-ai-model");
-    const $visionModel = root$5.querySelector("#ykt-ai-vision-model");
-    const $temperature = root$5.querySelector("#ykt-ai-temperature");
-    const $ocrApi = root$5.querySelector("#ykt-ai-ocr-api");
-    const $ocrApiKey = root$5.querySelector("#ykt-ai-ocr-api-key");
-    const $translateApi = root$5.querySelector("#ykt-ai-translate-api");
-    const $translateApiKey = root$5.querySelector("#ykt-ai-translate-api-key");
-    const $translateModel = root$5.querySelector("#ykt-ai-translate-model");
+        const $profileSelect = root$4.querySelector("#ykt-ai-profile-select");
+    const $profileAdd = root$4.querySelector("#ykt-ai-profile-add");
+    const $profileDel = root$4.querySelector("#ykt-ai-profile-del");
+    const $profileName = root$4.querySelector("#ykt-ai-profile-name");
+    const $baseUrl = root$4.querySelector("#ykt-ai-base-url");
+    const $api = root$4.querySelector("#kimi-api-key");
+    const $model = root$4.querySelector("#ykt-ai-model");
+    const $visionModel = root$4.querySelector("#ykt-ai-vision-model");
+    const $temperature = root$4.querySelector("#ykt-ai-temperature");
+    const $ocrApi = root$4.querySelector("#ykt-ai-ocr-api");
+    const $ocrApiKey = root$4.querySelector("#ykt-ai-ocr-api-key");
+    const $translateApi = root$4.querySelector("#ykt-ai-translate-api");
+    const $translateApiKey = root$4.querySelector("#ykt-ai-translate-api-key");
+    const $translateModel = root$4.querySelector("#ykt-ai-translate-model");
     // === 其他 UI 原有字段 ===
-        const $auto = root$5.querySelector("#ykt-input-auto-answer");
-    const $autoJoin = root$5.querySelector("#ykt-input-auto-join");
-    const $autoJoinAutoAnswer = root$5.querySelector("#ykt-input-auto-join-auto-answer");
-    const $autoAnalyze = root$5.querySelector("#ykt-input-ai-auto-analyze");
-    const $delay = root$5.querySelector("#ykt-input-answer-delay");
-    const $rand = root$5.querySelector("#ykt-input-random-delay");
-    const $priority = root$5.querySelector("#ykt-ai-pick-main-first");
-    const $notifyDur = root$5.querySelector("#ykt-input-notify-duration");
-    const $notifyVol = root$5.querySelector("#ykt-input-notify-volume");
-    const $notifyAll = root$5.querySelector("#ykt-input-notify-all");
-    const $notifyProblemStart = root$5.querySelector("#ykt-input-notify-problem-start");
-    const $notifyAssessment = root$5.querySelector("#ykt-input-notify-assessment-publish");
-    const $notifyCourseware = root$5.querySelector("#ykt-input-notify-courseware-publish");
-    const $notifyOther = root$5.querySelector("#ykt-input-notify-other-publish");
-    const $notifyLessonFinished = root$5.querySelector("#ykt-input-notify-lesson-finished");
-    const $notifyAutoAnswerScheduled = root$5.querySelector("#ykt-input-notify-auto-answer-scheduled");
-    const $notifyAutoAnswerStarted = root$5.querySelector("#ykt-input-notify-auto-answer-started");
-    const $notifyAutoAnswerSucceeded = root$5.querySelector("#ykt-input-notify-auto-answer-succeeded");
-    const $notifyAutoAnswerFailed = root$5.querySelector("#ykt-input-notify-auto-answer-failed");
-    const $notifyNative = root$5.querySelector("#ykt-input-notify-native");
-    const $notifyPopup = root$5.querySelector("#ykt-input-notify-popup");
-    const $notifySound = root$5.querySelector("#ykt-input-notify-sound");
-    const $keepScreenAwake = root$5.querySelector("#ykt-input-keep-screen-awake");
-    const $iftex = root$5.querySelector("#ykt-ui-tex");
-    const $audioFile = root$5.querySelector("#ykt-input-notify-audio-file");
-    const $audioUrl = root$5.querySelector("#ykt-input-notify-audio-url");
-    const $applyUrl = root$5.querySelector("#ykt-btn-apply-audio-url");
-    const $preview = root$5.querySelector("#ykt-btn-preview-audio");
-    const $clear = root$5.querySelector("#ykt-btn-clear-audio");
-    const $audioName = root$5.querySelector("#ykt-tip-audio-name");
+        const $auto = root$4.querySelector("#ykt-input-auto-answer");
+    const $autoJoin = root$4.querySelector("#ykt-input-auto-join");
+    const $autoJoinAutoAnswer = root$4.querySelector("#ykt-input-auto-join-auto-answer");
+    const $autoAnalyze = root$4.querySelector("#ykt-input-ai-auto-analyze");
+    const $delay = root$4.querySelector("#ykt-input-answer-delay");
+    const $rand = root$4.querySelector("#ykt-input-random-delay");
+    const $priority = root$4.querySelector("#ykt-ai-pick-main-first");
+    const $notifyDur = root$4.querySelector("#ykt-input-notify-duration");
+    const $notifyVol = root$4.querySelector("#ykt-input-notify-volume");
+    const $notifyAll = root$4.querySelector("#ykt-input-notify-all");
+    const $notifyProblemStart = root$4.querySelector("#ykt-input-notify-problem-start");
+    const $notifyAssessment = root$4.querySelector("#ykt-input-notify-assessment-publish");
+    const $notifyCourseware = root$4.querySelector("#ykt-input-notify-courseware-publish");
+    const $notifyOther = root$4.querySelector("#ykt-input-notify-other-publish");
+    const $notifyLessonFinished = root$4.querySelector("#ykt-input-notify-lesson-finished");
+    const $notifyAutoAnswerScheduled = root$4.querySelector("#ykt-input-notify-auto-answer-scheduled");
+    const $notifyAutoAnswerStarted = root$4.querySelector("#ykt-input-notify-auto-answer-started");
+    const $notifyAutoAnswerSucceeded = root$4.querySelector("#ykt-input-notify-auto-answer-succeeded");
+    const $notifyAutoAnswerFailed = root$4.querySelector("#ykt-input-notify-auto-answer-failed");
+    const $notifyNative = root$4.querySelector("#ykt-input-notify-native");
+    const $notifyPopup = root$4.querySelector("#ykt-input-notify-popup");
+    const $notifySound = root$4.querySelector("#ykt-input-notify-sound");
+    const $keepScreenAwake = root$4.querySelector("#ykt-input-keep-screen-awake");
+    const $iftex = root$4.querySelector("#ykt-ui-tex");
+    const $audioFile = root$4.querySelector("#ykt-input-notify-audio-file");
+    const $audioUrl = root$4.querySelector("#ykt-input-notify-audio-url");
+    const $applyUrl = root$4.querySelector("#ykt-btn-apply-audio-url");
+    const $preview = root$4.querySelector("#ykt-btn-preview-audio");
+    const $clear = root$4.querySelector("#ykt-btn-clear-audio");
+    const $audioName = root$4.querySelector("#ykt-tip-audio-name");
     const reminderFields = {
       notifyProblems: $notifyAll,
       notifyProblemStarts: $notifyProblemStart,
@@ -736,7 +740,7 @@
     syncMountedForm = syncFormFromConfig;
     syncFormFromConfig();
     // 保存设置
-        root$5.querySelector("#ykt-btn-settings-save").addEventListener("click", async () => {
+        root$4.querySelector("#ykt-btn-settings-save").addEventListener("click", async () => {
       // --- 保存当前 Profile ---
       const ai = ui.config.ai;
       const pid = ai.activeProfileId;
@@ -787,7 +791,7 @@
     //--------------------------------------
     //            重置为默认
     //--------------------------------------
-        root$5.querySelector("#ykt-btn-settings-reset").addEventListener("click", async () => {
+        root$4.querySelector("#ykt-btn-settings-reset").addEventListener("click", async () => {
       if (!confirm("确定要重置为默认设置吗？")) return;
       Object.assign(ui.config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
       ensureAIProfiles(ui.config.ai);
@@ -850,7 +854,7 @@
       ui.toast("已清除自定义音频");
     });
     // 测试提醒
-        const $btnTest = root$5.querySelector("#ykt-btn-test-notify");
+        const $btnTest = root$4.querySelector("#ykt-btn-test-notify");
     if ($btnTest) $btnTest.addEventListener("click", () => {
       const mockProblem = {
         problemId: "TEST-001",
@@ -862,9 +866,9 @@
       });
     });
     // 关闭按钮
-        root$5.querySelector("#ykt-settings-close").addEventListener("click", () => showSettingsPanel(false));
-    mounted$6 = true;
-    return root$5;
+        root$4.querySelector("#ykt-settings-close").addEventListener("click", () => showSettingsPanel(false));
+    mounted$5 = true;
+    return root$4;
   }
   function showSettingsPanel(visible = true) {
     mountSettingsPanel();
@@ -1611,8 +1615,8 @@
   }
   const L$2 = (...a) => console.log("[雨课堂助手][DBG][ai]", ...a);
   const W$2 = (...a) => console.warn("[雨课堂助手][WARN][ai]", ...a);
-  let mounted$5 = false;
-  let root$4;
+  let mounted$4 = false;
+  let root$3;
   let preferredSlideFromPresentation = null;
  // 启用来自presentation的页面
     let preferredSlidesFromPresentation = [];
@@ -1842,12 +1846,12 @@
     };
   }
   function mountAIPanel() {
-    if (mounted$5) return root$4;
+    if (mounted$4) return root$3;
     normalizeRepoSlidesKeys$1("ai.mount");
     const host = document.createElement("div");
     host.innerHTML = tpl$4;
     document.body.appendChild(host.firstElementChild);
-    root$4 = document.getElementById("ykt-ai-answer-panel");
+    root$3 = document.getElementById("ykt-ai-answer-panel");
     $$4("#ykt-ai-close")?.addEventListener("click", () => showAIPanel(false));
     $$4("#ykt-ai-ask")?.addEventListener("click", askAIFusionMode);
     waitForVueReady().then(() => {
@@ -1935,13 +1939,13 @@
       renderQuestion();
       renderSelectedPPTPreview();
     });
-    mounted$5 = true;
+    mounted$4 = true;
     L$2("mountAIPanel 完成, cfg.aiSlidePickPriority=", ui?.config?.aiSlidePickPriority);
-    return root$4;
+    return root$3;
   }
   function showAIPanel(v = true) {
     mountAIPanel();
-    root$4.classList.toggle("visible", !!v);
+    root$3.classList.toggle("visible", !!v);
     if (v) {
       renderQuestion();
       if (ui.config.aiAutoAnalyze) queueMicrotask(() => {
@@ -2249,7 +2253,7 @@
     return askAIFusionMode();
   }
   var tpl$3 = '<div id="ykt-presentation-panel" class="ykt-panel">\n  <style>\n    #ykt-presentation-panel .slide-thumb.selected {\n      outline: 2px solid #3b82f6;\n      outline-offset: 2px;\n    }\n  </style>\n  <div class="panel-header">\n    <h3>课件查看</h3>\n    <div class="panel-controls">\n      <label>\n        <input type="checkbox" id="ykt-show-all-slides"> 切换全部页面/问题页面\n      </label>\n      <button id="ykt-ask-current">提问当前PPT</button>\n      <button id="ykt-ocr-current">文字识别</button>\n      <button id="ykt-open-problem-list">题目列表</button>\n      <button id="ykt-download-current">截图下载</button>\n      <button id="ykt-download-pdf">整册下载(PDF)</button>\n      <span class="close-btn" id="ykt-presentation-close"><i class="fas fa-times"></i></span>\n    </div>\n  </div>\n\n  <div class="panel-body">\n    <div class="panel-left">\n      <div id="ykt-presentation-list" class="presentation-list"></div>\n    </div>\n    <div class="panel-right">\n      <div id="ykt-slide-view" class="slide-view">\n        <div class="slide-cover">\n          <div class="empty-message">选择左侧的幻灯片查看详情</div>\n        </div>\n        <div id="ykt-problem-view" class="problem-view"></div>\n      </div>\n      <div id="ykt-ocr-panel" class="ocr-panel">\n        <div class="ocr-head">\n          <span>文字结果</span>\n          <span id="ykt-ocr-status" class="ocr-status">未开始</span>\n        </div>\n        <div id="ykt-ocr-tip" class="ocr-tip">选择课件页后点击“文字识别”。</div>\n        <textarea id="ykt-ocr-result" class="ocr-result" readonly placeholder="识别结果会显示在这里，支持直接复制。"></textarea>\n        <div class="ocr-translate-bar">\n          <label for="ykt-translate-target">目标语言</label>\n          <input type="text" id="ykt-translate-target" class="ocr-target-input" placeholder="默认使用浏览器语言">\n          <button id="ykt-translate-toggle">翻译</button>\n          <span id="ykt-translate-status" class="ocr-status">未翻译</span>\n        </div>\n        <div id="ykt-translate-tip" class="ocr-tip">默认翻译到浏览器语言，也可手动修改目标语言。</div>\n      </div>\n    </div>\n  </div>\n</div>\n';
-  let mounted$4 = false;
+  let mounted$3 = false;
   let host;
   let staticReportReady = false;
  //已结束课程
@@ -2669,7 +2673,7 @@
     return true;
   }
   function mountPresentationPanel() {
-    if (mounted$4) return host;
+    if (mounted$3) return host;
     normalizeRepoSlidesKeys("presentation.mount");
     const wrapper = document.createElement("div");
     wrapper.innerHTML = tpl$3;
@@ -2742,7 +2746,7 @@
       L$1("切换 showAllSlides =", ui.config.showAllSlides);
       updatePresentationList();
     });
-    mounted$4 = true;
+    mounted$3 = true;
     renderOCRState();
     renderTranslationState();
     L$1("mountPresentationPanel 完成");
@@ -3688,25 +3692,25 @@
     detail.appendChild(editorBox);
   }
   // ========== 面板生命周期 ==========
-    let mounted$3 = false;
-  let root$3;
+    let mounted$2 = false;
+  let root$2;
   function mountProblemListPanel() {
-    if (mounted$3) return root$3;
+    if (mounted$2) return root$2;
     const wrap = document.createElement("div");
     wrap.innerHTML = tpl$2;
     document.body.appendChild(wrap.firstElementChild);
-    root$3 = document.getElementById("ykt-problem-list-panel");
+    root$2 = document.getElementById("ykt-problem-list-panel");
     $$2("#ykt-problem-list-close")?.addEventListener("click", () => showProblemListPanel(false));
     window.addEventListener("ykt:open-problem-list", () => showProblemListPanel(true));
-    mounted$3 = true;
+    mounted$2 = true;
     // 首次挂载时就做一次灌入
         hydrateProblemsFromPresentations();
     updateProblemList();
-    return root$3;
+    return root$2;
   }
   function showProblemListPanel(visible = true) {
     mountProblemListPanel();
-    root$3.classList.toggle("visible", !!visible);
+    root$2.classList.toggle("visible", !!visible);
     if (visible) {
       // 面板打开时再做一次灌入
       hydrateProblemsFromPresentations();
@@ -3763,20 +3767,20 @@
     });
   }
   var tpl$1 = '<div id="ykt-active-problems-panel" class="ykt-active-wrapper">\n  <div id="ykt-active-problems" class="active-problems"></div>\n</div>\n';
-  let mounted$2 = false;
-  let root$2;
+  let mounted$1 = false;
+  let root$1;
   function $$1(sel) {
     return document.querySelector(sel);
   }
   function mountActiveProblemsPanel() {
-    if (mounted$2) return root$2;
+    if (mounted$1) return root$1;
     const wrap = document.createElement("div");
     wrap.innerHTML = tpl$1;
     document.body.appendChild(wrap.firstElementChild);
-    root$2 = document.getElementById("ykt-active-problems-panel");
-    mounted$2 = true;
+    root$1 = document.getElementById("ykt-active-problems-panel");
+    mounted$1 = true;
     setInterval(() => updateActiveProblems(), 1e3);
-    return root$2;
+    return root$1;
   }
   function updateActiveProblems() {
     mountActiveProblemsPanel();
@@ -3816,31 +3820,31 @@
       card.appendChild(bar);
       box.appendChild(card);
     });
-    if (!hasActiveProblems) root$2.style.display = "none"; else root$2.style.display = "";
+    if (!hasActiveProblems) root$1.style.display = "none"; else root$1.style.display = "";
   }
-  var tpl = '<div id="ykt-tutorial-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>雨课堂助手使用教程</h3>\n    <span class="close-btn" id="ykt-tutorial-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="tutorial-content">\n      <h4>工具版本</h4>\n      <p>1.21.3</p>\n\n      <h4>功能介绍</h4>\n      <p>AI雨课堂助手是一个为雨课堂提供辅助功能的工具，可以帮助你更好地参与课堂互动。</p>\n      <p>项目仓库：<a href="https://github.com/ZaytsevZY/yuketang-helper-auto" target="_blank" rel="noopener">GitHub</a></p>\n      <p>脚本安装：<a href="https://greasyfork.org/zh-CN/scripts/531469-ai%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B-%E6%A8%A1%E5%9D%97%E5%8C%96%E6%9E%84%E5%BB%BA%E7%89%88" target="_blank" rel="noopener">GreasyFork</a></p>\n\n      <h4>工具栏按钮说明</h4>\n      <ul>\n        <li><i class="fas fa-bell"></i> <b>习题提醒</b>：切换是否在新习题出现时显示通知提示（蓝色=开启）。</li>\n        <li><i class="fas fa-file-powerpoint"></i> <b>课件浏览</b>：查看课件与题目页面，提问可见内容。</li>\n        <li><i class="fas fa-robot"></i> <b>AI 解答</b>：向 AI 询问当前题目并显示建议答案。</li>\n        <li><i class="fas fa-magic-wand-sparkles"></i> <b>自动作答</b>：切换自动作答（蓝色=开启）。</li>\n        <li><i class="fas fa-cog"></i> <b>设置</b>：配置 API 密钥与自动作答参数。</li>\n        <li><i class="fas fa-question-circle"></i> <b>使用教程</b>：显示/隐藏当前教程页面。</li>\n      </ul>\n\n      <h4>自动作答</h4>\n      <ul>\n        <li>在设置中开启自动作答并配置延迟/随机延迟。</li>\n        <li>需要配置 LLM API 密钥。</li>\n        <li>答案来自 AI，结果仅供参考。</li>\n      </ul>\n\n      <h4>AI 解答</h4>\n      <ol>\n        <li>点击设置（<i class="fas fa-cog"></i>）填入 API Key。</li>\n        <li>每个 AI Profile 可单独设置 Temperature（0–2）；留空时使用模型默认值，不会发送该参数。</li>\n        <li>点击 AI 解答（<i class="fas fa-robot"></i>）后会对“当前题目/最近遇到的题目”询问并解析。</li>\n      </ol>\n\n      <h4>课堂提醒、手机版与亮屏</h4>\n      <ul>\n        <li>设置中可以分别控制新题、题组发布、课件发布、其他发布、下课以及自动作答的每个阶段；系统通知、页面弹窗和提示音也可单独关闭。</li>\n        <li>打开或翻阅旧课件不会触发课件发布提醒；发布类提醒只提示，不会自动作答或提交。</li>\n        <li>手机进入 <code>/m/v2</code> 时会使用“仅提醒”模式，点击右下角铃铛即可设置提醒和亮屏，不会启动自动作答。</li>\n        <li>系统通知需由浏览器或篡改猴授予权限；脚本不会自动请求或修改系统通知权限。</li>\n        <li>“课堂保持亮屏”仅在可见的课堂页防止自动熄屏，无法阻止手动锁屏、后台冻结或系统省电策略。</li>\n      </ul>\n\n      <h4>注意事项</h4>\n      <p>1) 仅供学习参考，请独立思考；</p>\n      <p>2) 合理使用 API 额度；</p>\n      <p>3) 答案不保证 100% 正确；</p>\n      <p>4) 自动作答有一定风险，谨慎开启。</p>\n\n      <h4>联系方式</h4>\n      <ul>\n        <li>请在<a href="https://github.com/ZaytsevZY/yuketang-helper-auto/issues" target="_blank" rel="noopener">GitHub Issues</a>提出问题</li>\n      </ul>\n    </div>\n  </div>\n</div>\n';
-  let mounted$1 = false;
-  let root$1;
+  var tpl = '<div id="ykt-tutorial-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>雨课堂助手使用教程</h3>\n    <span class="close-btn" id="ykt-tutorial-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="tutorial-content">\n      <h4>工具版本</h4>\n      <p>1.21.3</p>\n\n      <h4>功能介绍</h4>\n      <p>AI雨课堂助手是一个为雨课堂提供辅助功能的工具，可以帮助你更好地参与课堂互动。</p>\n      <p>项目仓库：<a href="https://github.com/ZaytsevZY/yuketang-helper-auto" target="_blank" rel="noopener">GitHub</a></p>\n      <p>脚本安装：<a href="https://greasyfork.org/zh-CN/scripts/531469-ai%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B-%E6%A8%A1%E5%9D%97%E5%8C%96%E6%9E%84%E5%BB%BA%E7%89%88" target="_blank" rel="noopener">GreasyFork</a></p>\n\n      <h4>工具栏按钮说明</h4>\n      <ul>\n        <li><i class="fas fa-bell"></i> <b>习题提醒</b>：切换是否在新习题出现时显示通知提示（蓝色=开启）。</li>\n        <li><i class="fas fa-file-powerpoint"></i> <b>课件浏览</b>：查看课件与题目页面，提问可见内容。</li>\n        <li><i class="fas fa-robot"></i> <b>AI 解答</b>：向 AI 询问当前题目并显示建议答案。</li>\n        <li><i class="fas fa-magic-wand-sparkles"></i> <b>自动作答</b>：切换自动作答（蓝色=开启）。</li>\n        <li><i class="fas fa-cog"></i> <b>设置</b>：配置 API 密钥与自动作答参数。</li>\n        <li><i class="fas fa-question-circle"></i> <b>使用教程</b>：显示/隐藏当前教程页面。</li>\n      </ul>\n\n      <h4>自动作答</h4>\n      <ul>\n        <li>在设置中开启自动作答并配置延迟/随机延迟。</li>\n        <li>需要配置 LLM API 密钥。</li>\n        <li>答案来自 AI，结果仅供参考。</li>\n      </ul>\n\n      <h4>AI 解答</h4>\n      <ol>\n        <li>点击设置（<i class="fas fa-cog"></i>）填入 API Key。</li>\n        <li>每个 AI Profile 可单独设置 Temperature（0–2）；留空时使用模型默认值，不会发送该参数。</li>\n        <li>点击 AI 解答（<i class="fas fa-robot"></i>）后会对“当前题目/最近遇到的题目”询问并解析。</li>\n      </ol>\n\n      <h4>课堂提醒、桌面路由与亮屏</h4>\n      <ul>\n        <li>设置中可以分别控制新题、题组发布、课件发布、其他发布、下课以及自动作答的每个阶段；系统通知、页面弹窗和提示音也可单独关闭。</li>\n        <li>打开或翻阅旧课件不会触发课件发布提醒；发布类提醒只提示，不会自动作答或提交。</li>\n        <li>脚本只运行桌面端功能。若雨课堂跳转到 <code>/m/v2</code>，脚本会自动改写为对应桌面路径；若服务器仍强制跳回手机版，请在浏览器中启用“桌面版网站”。</li>\n        <li>系统通知需由浏览器或篡改猴授予权限；脚本不会自动请求或修改系统通知权限。</li>\n        <li>“课堂保持亮屏”仅在可见的课堂页防止自动熄屏，无法阻止手动锁屏、后台冻结或系统省电策略。</li>\n      </ul>\n\n      <h4>注意事项</h4>\n      <p>1) 仅供学习参考，请独立思考；</p>\n      <p>2) 合理使用 API 额度；</p>\n      <p>3) 答案不保证 100% 正确；</p>\n      <p>4) 自动作答有一定风险，谨慎开启。</p>\n\n      <h4>联系方式</h4>\n      <ul>\n        <li>请在<a href="https://github.com/ZaytsevZY/yuketang-helper-auto/issues" target="_blank" rel="noopener">GitHub Issues</a>提出问题</li>\n      </ul>\n    </div>\n  </div>\n</div>\n';
+  let mounted = false;
+  let root;
   function $(sel) {
     return document.querySelector(sel);
   }
   function mountTutorialPanel() {
-    if (mounted$1) return root$1;
+    if (mounted) return root;
     const host = document.createElement("div");
     host.innerHTML = tpl;
     document.body.appendChild(host.firstElementChild);
-    root$1 = document.getElementById("ykt-tutorial-panel");
+    root = document.getElementById("ykt-tutorial-panel");
     $("#ykt-tutorial-close")?.addEventListener("click", () => showTutorialPanel(false));
-    mounted$1 = true;
-    return root$1;
+    mounted = true;
+    return root;
   }
   function showTutorialPanel(visible = true) {
     mountTutorialPanel();
-    root$1.classList.toggle("visible", !!visible);
+    root.classList.toggle("visible", !!visible);
   }
   function toggleTutorialPanel() {
     mountTutorialPanel();
-    const vis = root$1.classList.contains("visible");
+    const vis = root.classList.contains("visible");
     showTutorialPanel(!vis);
     const helpBtn = document.getElementById("ykt-btn-help");
     if (helpBtn) helpBtn.classList.toggle("active", !vis);
@@ -5243,8 +5247,8 @@
   // src/core/realtime-dispatch.js
   /**
    * Converts a raw realtime frame into an action call without coupling the
-   * protocol parser to desktop-only behavior.  The same frame can therefore be
-   * used by the /m/v2 reminder runtime without enabling auto-answer.
+   * protocol parser to the action layer.  The current userscript runs only the
+   * desktop runtime, while this option remains available for protocol tests.
    */  function dispatchRealtimeMessage(message, {getRuntimeMode: getRuntimeMode = () => "desktop", handlers: handlers = {}} = {}) {
     const realtime = getRealtimeEvent(message);
     const notificationOnly = getRuntimeMode() === "mobile-reminder";
@@ -5534,89 +5538,111 @@
     });
   }
   // src/core/runtime-mode.js
-    function isMobileReminderPath(pathname = "") {
-    return /^\/m\/v2(?:\/|$)/.test(String(pathname));
+    const MOBILE_ROUTE_PATTERN = /^\/m\/v2(?:\/|$)/;
+  const REDIRECT_LOOP_STORAGE_KEY = "__ykt_desktop_route_guard_target__";
+  function isMobileReminderPath(pathname = "") {
+    return MOBILE_ROUTE_PATTERN.test(String(pathname));
   }
-  /** Mobile /m/v2 only monitors classroom events; it never starts auto-answer. */  function getRuntimeMode(pathname = "") {
-    return isMobileReminderPath(pathname) ? "mobile-reminder" : "desktop";
+  function normalizePart(value, prefix) {
+    const text = String(value || "");
+    if (!text || text.startsWith(prefix)) return text;
+    return `${prefix}${text}`;
+  }
+  /**
+   * Maps a mobile page to its desktop equivalent while preserving the page's
+   * query string and hash.  A null result means that the route is already
+   * desktop-compatible and must be left untouched.
+   */  function getDesktopRouteForMobileLocation({pathname: pathname = "", search: search = "", hash: hash = ""} = {}) {
+    const currentPath = String(pathname);
+    if (!isMobileReminderPath(currentPath)) return null;
+    const mobileSuffix = currentPath.slice("/m/v2".length);
+    const desktopPath = mobileSuffix === "" || mobileSuffix === "/" ? "/v2/web/index" : `/v2/web${mobileSuffix}`;
+    return `${desktopPath}${normalizePart(search, "?")}${normalizePart(hash, "#")}`;
+  }
+  function getDesktopRouteForNavigation(value, location) {
+    if (value === void 0 || value === null || value === "") return null;
+    try {
+      const url = new URL(String(value), location?.href || location?.origin || void 0);
+      if (location?.origin && url.origin !== location.origin) return null;
+      return getDesktopRouteForMobileLocation(url);
+    } catch {
+      return null;
+    }
+  }
+  function clearRedirectLoopMarker(targetWindow) {
+    try {
+      targetWindow?.sessionStorage?.removeItem(REDIRECT_LOOP_STORAGE_KEY);
+    } catch {}
+  }
+  function redirectCurrentMobileRoute(targetWindow) {
+    const location = targetWindow?.location;
+    const target = getDesktopRouteForMobileLocation(location);
+    if (!target) {
+      clearRedirectLoopMarker(targetWindow);
+      return {
+        redirected: false,
+        reason: "desktop-route"
+      };
+    }
+    try {
+      const storage = targetWindow?.sessionStorage;
+      if (storage?.getItem(REDIRECT_LOOP_STORAGE_KEY) === target) {
+        const message = "雨课堂仍将桌面页重定向到手机版。请在浏览器中启用“桌面版网站”后重新打开课程。";
+        console.warn(`[雨课堂助手][WARN] ${message}`);
+        try {
+          targetWindow?.alert?.(message);
+        } catch {}
+        return {
+          redirected: false,
+          reason: "loop-prevented"
+        };
+      }
+      storage?.setItem(REDIRECT_LOOP_STORAGE_KEY, target);
+    } catch {}
+    location?.replace?.(target);
+    return {
+      redirected: true,
+      reason: "mobile-route"
+    };
+  }
+  /**
+   * Keeps the userscript desktop-only.  It catches the mobile landing route as
+   * early as possible and also rewrites SPA/history/link navigation before the
+   * host application can enter /m/v2.
+   */  function installDesktopRouteGuard({targetWindow: targetWindow = (typeof window !== "undefined" ? window : null), targetDocument: targetDocument = (typeof document !== "undefined" ? document : null)} = {}) {
+    const initialResult = redirectCurrentMobileRoute(targetWindow);
+    if (initialResult.redirected || initialResult.reason === "loop-prevented") return initialResult;
+    const history = targetWindow?.history;
+    const location = targetWindow?.location;
+    for (const key of [ "pushState", "replaceState" ]) {
+      const original = history?.[key];
+      if (typeof original !== "function") continue;
+      history[key] = function(...args) {
+        const replacement = getDesktopRouteForNavigation(args[2], location);
+        if (replacement) args[2] = replacement;
+        return original.apply(this, args);
+      };
+    }
+    const redirectIfMobile = () => redirectCurrentMobileRoute(targetWindow);
+    targetWindow?.addEventListener?.("popstate", redirectIfMobile);
+    targetWindow?.addEventListener?.("hashchange", redirectIfMobile);
+    targetDocument?.addEventListener?.("click", event => {
+      if (event?.defaultPrevented || event?.button !== void 0 && event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const anchor = event.target?.closest?.("a[href]");
+      if (!anchor || anchor.target && anchor.target !== "_self" || anchor.hasAttribute?.("download")) return;
+      const replacement = getDesktopRouteForNavigation(anchor.href, location);
+      if (!replacement) return;
+      event.preventDefault();
+      location?.assign?.(replacement);
+    }, true);
+    return initialResult;
+  }
+  /** Mobile routes are redirect-only; the assistant no longer runs a mobile runtime. */  function getRuntimeMode(pathname = "") {
+    return isMobileReminderPath(pathname) ? "desktop-redirect" : "desktop";
   }
   /** Root URLs are redirect entry points, not a full desktop runtime yet. */  function shouldStartDesktopRuntime(pathname = "") {
     const normalizedPath = String(pathname);
     return normalizedPath !== "/" && normalizedPath !== "" && getRuntimeMode(normalizedPath) === "desktop";
-  }
-  // src/ui/mobile-reminder-panel.js
-    let mounted = false;
-  let root = null;
-  function optionRow(option) {
-    return `\n    <label class="ykt-mobile-reminder-row">\n      <span class="ykt-mobile-reminder-copy">\n        <strong>${option.label}</strong>\n        <small>${option.detail}</small>\n      </span>\n      <input type="checkbox" data-reminder-field="${option.key}" />\n    </label>`;
-  }
-  function installStyles() {
-    if (document.getElementById("ykt-mobile-reminder-styles")) return;
-    const style = document.createElement("style");
-    style.id = "ykt-mobile-reminder-styles";
-    style.textContent = `\n    #ykt-mobile-reminder-root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }\n    #ykt-mobile-reminder-toggle {\n      position: fixed; right: 16px; bottom: 22px; z-index: 2147483000;\n      width: 52px; height: 52px; border: 0; border-radius: 50%;\n      background: #1368d5; color: #fff; box-shadow: 0 8px 22px rgba(0, 61, 153, .36);\n      font-size: 23px; line-height: 1; touch-action: manipulation;\n    }\n    #ykt-mobile-reminder-sheet {\n      position: fixed; inset: auto 0 0; z-index: 2147483001;\n      max-height: min(82vh, 760px); overflow: auto; box-sizing: border-box;\n      padding: 16px 16px calc(18px + env(safe-area-inset-bottom));\n      background: #f8fbff; color: #16304e; border-radius: 18px 18px 0 0;\n      box-shadow: 0 -12px 30px rgba(5, 42, 89, .22);\n      transform: translateY(105%); transition: transform .18s ease-out;\n      visibility: hidden;\n    }\n    #ykt-mobile-reminder-root.ykt-mobile-reminder-open #ykt-mobile-reminder-sheet {\n      transform: translateY(0); visibility: visible;\n    }\n    .ykt-mobile-reminder-header { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }\n    .ykt-mobile-reminder-header > div { flex: 1; }\n    .ykt-mobile-reminder-header p { margin: 3px 0 0; color: #5e7189; font-size: 12px; line-height: 1.45; }\n    .ykt-mobile-reminder-eyebrow { color: #1368d5; font-weight: 700; font-size: 11px; letter-spacing: .08em; }\n    .ykt-mobile-reminder-header h2 { margin: 1px 0 0; font-size: 20px; color: #102a46; }\n    .ykt-mobile-reminder-close { border: 0; background: transparent; font-size: 26px; color: #5d6c7c; padding: 0 4px; }\n    .ykt-mobile-reminder-section { margin: 13px 0; border: 1px solid #d7e4f5; border-radius: 12px; overflow: hidden; background: #fff; }\n    .ykt-mobile-reminder-section h3 { margin: 0; padding: 10px 12px; color: #254767; background: #eff6ff; font-size: 13px; }\n    .ykt-mobile-reminder-row { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-top: 1px solid #edf2f8; }\n    .ykt-mobile-reminder-row:first-of-type { border-top: 0; }\n    .ykt-mobile-reminder-copy { flex: 1; min-width: 0; }\n    .ykt-mobile-reminder-copy strong { display: block; font-size: 14px; font-weight: 650; }\n    .ykt-mobile-reminder-copy small { display: block; margin-top: 3px; color: #687a8e; font-size: 11px; line-height: 1.35; }\n    .ykt-mobile-reminder-row input[type="checkbox"] { width: 20px; height: 20px; accent-color: #1368d5; flex: 0 0 auto; }\n    .ykt-mobile-reminder-number { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-top: 1px solid #edf2f8; font-size: 13px; }\n    .ykt-mobile-reminder-number label { flex: 1; }\n    .ykt-mobile-reminder-number input { width: 72px; border: 1px solid #c6d7ec; border-radius: 8px; padding: 7px; font-size: 14px; }\n    .ykt-mobile-reminder-actions { display: flex; gap: 8px; margin-top: 14px; }\n    .ykt-mobile-reminder-actions button { flex: 1; min-height: 42px; border-radius: 10px; font-size: 14px; font-weight: 650; }\n    #ykt-mobile-reminder-test { border: 1px solid #9abbe5; background: #fff; color: #155eaf; }\n    #ykt-mobile-reminder-close-sheet { border: 0; background: #1368d5; color: #fff; }\n    #ykt-mobile-reminder-status { min-height: 18px; margin: 8px 2px 0; color: #64778c; font-size: 11px; }\n    @media (prefers-reduced-motion: reduce) {\n      #ykt-mobile-reminder-sheet { transition: none; }\n    }\n  `;
-    document.head.appendChild(style);
-  }
-  function mountMobileReminderPanel() {
-    if (mounted) return root;
-    installStyles();
-    root = document.createElement("div");
-    root.id = "ykt-mobile-reminder-root";
-    root.innerHTML = `\n    <button id="ykt-mobile-reminder-toggle" type="button" aria-label="打开课堂提醒控制" aria-expanded="false">🔔</button>\n    <section id="ykt-mobile-reminder-sheet" aria-label="课堂提醒控制">\n      <header class="ykt-mobile-reminder-header">\n        <div>\n          <div class="ykt-mobile-reminder-eyebrow">CLASSROOM SIGNAL</div>\n          <h2>提醒控制</h2>\n          <p>手机版只监听课堂事件，不会启动自动作答或自动进入课堂。</p>\n        </div>\n        <button class="ykt-mobile-reminder-close" type="button" aria-label="关闭提醒控制">×</button>\n      </header>\n      <div class="ykt-mobile-reminder-section">\n        <label class="ykt-mobile-reminder-row">\n          <span class="ykt-mobile-reminder-copy">\n            <strong>总提醒开关</strong>\n            <small>关闭后，下面的所有课堂事件都不会提醒。</small>\n          </span>\n          <input type="checkbox" data-reminder-field="notifyProblems" />\n        </label>\n      </div>\n      <div class="ykt-mobile-reminder-section">\n        <h3>提醒事件</h3>\n        ${REMINDER_EVENT_OPTIONS.map(optionRow).join("")}\n      </div>\n      <div class="ykt-mobile-reminder-section">\n        <h3>提醒方式</h3>\n        ${REMINDER_CHANNEL_OPTIONS.map(optionRow).join("")}\n        <div class="ykt-mobile-reminder-number">\n          <label for="ykt-mobile-reminder-duration">页面弹窗停留（秒）</label>\n          <input id="ykt-mobile-reminder-duration" type="number" min="2" max="60" inputmode="numeric" />\n        </div>\n        <div class="ykt-mobile-reminder-number">\n          <label for="ykt-mobile-reminder-volume">提示音量（0–100）</label>\n          <input id="ykt-mobile-reminder-volume" type="number" min="0" max="100" inputmode="numeric" />\n        </div>\n      </div>\n      <div class="ykt-mobile-reminder-section">\n        <h3>课堂运行</h3>\n        <label class="ykt-mobile-reminder-row">\n          <span class="ykt-mobile-reminder-copy">\n            <strong>课堂保持亮屏</strong>\n            <small>仅防自动熄屏；锁屏、后台冻结和系统省电策略无法由脚本绕过。</small>\n          </span>\n          <input id="ykt-mobile-reminder-wake-lock" type="checkbox" />\n        </label>\n      </div>\n      <div class="ykt-mobile-reminder-actions">\n        <button id="ykt-mobile-reminder-test" type="button">测试当前提醒方式</button>\n        <button id="ykt-mobile-reminder-close-sheet" type="button">完成</button>\n      </div>\n      <div id="ykt-mobile-reminder-status" role="status"></div>\n    </section>`;
-    document.body.appendChild(root);
-    const $toggle = root.querySelector("#ykt-mobile-reminder-toggle");
-    const $sheet = root.querySelector("#ykt-mobile-reminder-sheet");
-    const $close = root.querySelector(".ykt-mobile-reminder-close");
-    const $closeSheet = root.querySelector("#ykt-mobile-reminder-close-sheet");
-    const $test = root.querySelector("#ykt-mobile-reminder-test");
-    const $status = root.querySelector("#ykt-mobile-reminder-status");
-    const $duration = root.querySelector("#ykt-mobile-reminder-duration");
-    const $volume = root.querySelector("#ykt-mobile-reminder-volume");
-    const $wakeLock = root.querySelector("#ykt-mobile-reminder-wake-lock");
-    const reminderFields = Object.fromEntries([ ...root.querySelectorAll("[data-reminder-field]") ].map(field => [ field.dataset.reminderField, field ]));
-    const setOpen = next => {
-      root.classList.toggle("ykt-mobile-reminder-open", next);
-      $toggle.setAttribute("aria-expanded", String(next));
-      if (next) sync();
-    };
-    const showWakeLockStatus = status => {
-      if (!$wakeLock.checked) $status.textContent = "设置已保存。"; else if (status.reason === "active") $status.textContent = "已请求保持亮屏。"; else if (status.reason === "unsupported") $status.textContent = "当前浏览器不支持保持亮屏。"; else if (status.reason === "request-failed") $status.textContent = "系统未允许保持亮屏，请检查浏览器或省电设置。"; else $status.textContent = "设置已保存；页面可见时会尝试保持亮屏。";
-    };
-    const save = async () => {
-      Object.assign(ui.config, readReminderForm(reminderFields));
-      ui.config.notifyPopupDuration = Math.max(2e3, (+$duration.value || 0) * 1e3);
-      ui.config.notifyVolume = Math.max(0, Math.min(1, (+$volume.value || 0) / 100));
-      ui.config.keepScreenAwake = !!$wakeLock.checked;
-      ui.saveConfig();
-      const wakeLockStatus = await screenWakeLock.setEnabled(ui.config.keepScreenAwake);
-      showWakeLockStatus(wakeLockStatus);
-    };
-    const sync = () => {
-      syncReminderForm(reminderFields, ui.config);
-      $duration.value = Math.floor((ui.config.notifyPopupDuration || 5e3) / 1e3);
-      $volume.value = Math.round(100 * (ui.config.notifyVolume ?? .6));
-      $wakeLock.checked = !!ui.config.keepScreenAwake;
-      $status.textContent = "每项修改会自动保存。";
-    };
-    $toggle.addEventListener("click", () => setOpen(!root.classList.contains("ykt-mobile-reminder-open")));
-    $close.addEventListener("click", () => setOpen(false));
-    $closeSheet.addEventListener("click", () => setOpen(false));
-    $sheet.addEventListener("change", () => {
-      void save();
-    });
-    $test.addEventListener("click", () => {
-      ui.notifyProblem({
-        problemId: "MOBILE-REMINDER-TEST",
-        body: "【测试提醒】当前已按所选提醒方式发送。",
-        options: []
-      }, null, {
-        title: "课堂提醒测试",
-        nativeTitle: "课堂提醒测试"
-      });
-    });
-    sync();
-    mounted = true;
-    return root;
   }
   // src/index.js
     function loadFA() {
@@ -5653,10 +5679,6 @@
             pathname: window.location.pathname,
             hidden: document.hidden
           });
-          if (getRuntimeMode(window.location.pathname) === "mobile-reminder") {
-            console.log("[雨课堂助手][DEBUG] skip reload: mobile reminder mode");
-            return;
-          }
           if (skipLessonPages && /\/lesson\//.test(window.location.pathname)) {
             console.log("[雨课堂助手][DEBUG] skip reload: lesson page");
             return;
@@ -5674,7 +5696,6 @@
     } catch {}
   }
   let desktopStarted = false;
-  let mobileReminderStarted = false;
   let runtimeBootQueued = false;
   function startDesktopRuntime() {
     if (desktopStarted) return;
@@ -5693,22 +5714,10 @@
     actions.startAutoAnswerLoop();
     actions.launchLessonHelper();
   }
-  function startMobileReminderRuntime() {
-    if (mobileReminderStarted) return;
-    mobileReminderStarted = true;
-    mountMobileReminderPanel();
-    void screenWakeLock.setEnabled(ui.config.keepScreenAwake);
-    console.log("[雨课堂助手][INFO] 已启动 /m/v2 手机版仅提醒模式");
-  }
   function bootCurrentRuntime() {
     const pathname = window.location.pathname;
-    const mode = getRuntimeMode(pathname);
-    if (mode === "mobile-reminder") {
-      startMobileReminderRuntime();
-      return;
-    }
-    // 根地址只是站点的跳转入口。等待它进入实际路由，避免手机被重定向到
-    // /m/v2 时先启动桌面的自动作答和完整面板。
+    // 根地址只是站点的跳转入口；/m/v2 会由 document-start 守卫改写，
+    // 在改写完成前不启动任何课堂运行时。
         if (shouldStartDesktopRuntime(pathname)) startDesktopRuntime();
   }
   function queueRuntimeBoot() {
@@ -5738,10 +5747,14 @@
     target.addEventListener?.("hashchange", queueRuntimeBoot);
   }
   (function main() {
-    // WebSocket needs to be patched at document-start.  Its mode callback is
-    // evaluated for every received frame, so a root URL redirect to /m/v2 is
-    // safe without a second page refresh.
-    installWSInterceptor({
+    const targetWindow = gm.uw || window;
+    const guard = installDesktopRouteGuard({
+      targetWindow: targetWindow,
+      targetDocument: targetWindow.document || document
+    });
+    if (guard.redirected || guard.reason === "loop-prevented") return;
+    // WebSocket needs to be patched at document-start.
+        installWSInterceptor({
       getRuntimeMode: () => getRuntimeMode(window.location.pathname)
     });
     installRuntimeRouteWatcher();

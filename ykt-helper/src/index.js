@@ -7,9 +7,7 @@ import { installToolbar } from './ui/toolbar.js';
 import { actions } from './state/actions.js';
 import { ui } from './ui/ui-api.js'; 
 import { gm } from './core/env.js';
-import { getRuntimeMode, shouldStartDesktopRuntime } from './core/runtime-mode.js';
-import { screenWakeLock } from './core/screen-wake-lock.js';
-import { mountMobileReminderPanel } from './ui/mobile-reminder-panel.js';
+import { getRuntimeMode, installDesktopRouteGuard, shouldStartDesktopRuntime } from './core/runtime-mode.js';
 
 function loadFA() {
   const link = document.createElement('link');
@@ -50,10 +48,6 @@ function startPeriodicReload(opts = {}) {
         hidden: document.hidden
       });
 
-      if (getRuntimeMode(window.location.pathname) === 'mobile-reminder') {
-        console.log('[雨课堂助手][DEBUG] skip reload: mobile reminder mode');
-        return;
-      }
       if (skipLessonPages && /\/lesson\//.test(window.location.pathname)) {
         console.log('[雨课堂助手][DEBUG] skip reload: lesson page');
         return;
@@ -73,7 +67,6 @@ function startPeriodicReload(opts = {}) {
 }
 
 let desktopStarted = false;
-let mobileReminderStarted = false;
 let runtimeBootQueued = false;
 
 function startDesktopRuntime() {
@@ -91,24 +84,10 @@ function startDesktopRuntime() {
   actions.launchLessonHelper();
 }
 
-function startMobileReminderRuntime() {
-  if (mobileReminderStarted) return;
-  mobileReminderStarted = true;
-  mountMobileReminderPanel();
-  void screenWakeLock.setEnabled(ui.config.keepScreenAwake);
-  console.log('[雨课堂助手][INFO] 已启动 /m/v2 手机版仅提醒模式');
-}
-
 function bootCurrentRuntime() {
   const pathname = window.location.pathname;
-  const mode = getRuntimeMode(pathname);
-  if (mode === 'mobile-reminder') {
-    startMobileReminderRuntime();
-    return;
-  }
-
-  // 根地址只是站点的跳转入口。等待它进入实际路由，避免手机被重定向到
-  // /m/v2 时先启动桌面的自动作答和完整面板。
+  // 根地址只是站点的跳转入口；/m/v2 会由 document-start 守卫改写，
+  // 在改写完成前不启动任何课堂运行时。
   if (shouldStartDesktopRuntime(pathname)) startDesktopRuntime();
 }
 
@@ -143,9 +122,14 @@ function installRuntimeRouteWatcher() {
 }
 
 (function main() {
-  // WebSocket needs to be patched at document-start.  Its mode callback is
-  // evaluated for every received frame, so a root URL redirect to /m/v2 is
-  // safe without a second page refresh.
+  const targetWindow = gm.uw || window;
+  const guard = installDesktopRouteGuard({
+    targetWindow,
+    targetDocument: targetWindow.document || document,
+  });
+  if (guard.redirected || guard.reason === 'loop-prevented') return;
+
+  // WebSocket needs to be patched at document-start.
   installWSInterceptor({
     getRuntimeMode: () => getRuntimeMode(window.location.pathname),
   });

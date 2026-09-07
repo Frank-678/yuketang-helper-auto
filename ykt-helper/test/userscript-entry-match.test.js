@@ -23,13 +23,19 @@ function matchesPattern(pattern, rawUrl) {
     && new RegExp(`^${wildcard(pathPattern)}$`).test(url.pathname);
 }
 
-test('injects on supported root URLs before the site navigates to /v2/web', () => {
+test('injects on supported root and exact /web entry URLs before mobile routing starts', () => {
   const patterns = matchPatternsFrom(meta);
 
   for (const url of [
     'https://www.yuketang.cn/',
     'https://pro.yuketang.cn/',
     'https://changjiang.yuketang.cn/',
+    'https://www.yuketang.cn/web',
+    'https://pro.yuketang.cn/web',
+    'https://changjiang.yuketang.cn/web',
+    'https://www.yuketang.cn/web/',
+    'https://pro.yuketang.cn/web/',
+    'https://changjiang.yuketang.cn/web/',
   ]) {
     assert.equal(patterns.some(pattern => matchesPattern(pattern, url)), true, url);
   }
