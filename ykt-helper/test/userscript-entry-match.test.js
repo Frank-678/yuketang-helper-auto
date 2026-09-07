@@ -23,7 +23,7 @@ function matchesPattern(pattern, rawUrl) {
     && new RegExp(`^${wildcard(pathPattern)}$`).test(url.pathname);
 }
 
-test('injects on supported root and exact /web entry URLs before mobile routing starts', () => {
+test('injects on supported root and exact desktop entry URLs before mobile routing starts', () => {
   const patterns = matchPatternsFrom(meta);
 
   for (const url of [
@@ -36,6 +36,9 @@ test('injects on supported root and exact /web entry URLs before mobile routing 
     'https://www.yuketang.cn/web/',
     'https://pro.yuketang.cn/web/',
     'https://changjiang.yuketang.cn/web/',
+    'https://www.yuketang.cn/v2/web',
+    'https://pro.yuketang.cn/v2/web',
+    'https://changjiang.yuketang.cn/v2/web',
   ]) {
     assert.equal(patterns.some(pattern => matchesPattern(pattern, url)), true, url);
   }

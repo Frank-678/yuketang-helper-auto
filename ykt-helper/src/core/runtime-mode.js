@@ -1,7 +1,9 @@
 // src/core/runtime-mode.js
 
 const MOBILE_ROUTE_PATTERN = /^\/m\/v2(?:\/|$)/;
+const DESKTOP_ENTRY_PATH_PATTERN = /^(?:\/|\/v2\/web(?:\/index)?\/?)$/;
 const REDIRECT_LOOP_STORAGE_KEY = '__ykt_desktop_route_guard_target__';
+const REDIRECT_LOOP_WINDOW_MS = 15 * 1000;
 
 export function isMobileReminderPath(pathname = '') {
   return MOBILE_ROUTE_PATTERN.test(String(pathname));
@@ -11,6 +13,40 @@ function normalizePart(value, prefix) {
   const text = String(value || '');
   if (!text || text.startsWith(prefix)) return text;
   return `${prefix}${text}`;
+}
+
+function isDesktopEntryPath(pathname = '') {
+  return DESKTOP_ENTRY_PATH_PATTERN.test(String(pathname));
+}
+
+/**
+ * Rain Classroom's PC bundle sends portrait entry pages to /m/v2 when
+ * innerWidth is less than innerHeight. Keep that one bootstrap check in
+ * desktop mode without changing the browser's user agent or lesson pages.
+ */
+export function installDesktopViewportGuard({
+  targetWindow = typeof window !== 'undefined' ? window : null,
+} = {}) {
+  const location = targetWindow?.location;
+  if (!isDesktopEntryPath(location?.pathname)) return { applied: false, reason: 'not-desktop-entry' };
+
+  const width = Number(targetWindow?.innerWidth);
+  const height = Number(targetWindow?.innerHeight);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width >= height) {
+    return { applied: false, reason: 'not-portrait' };
+  }
+
+  try {
+    Object.defineProperty(targetWindow, 'innerWidth', {
+      configurable: true,
+      get: () => height,
+    });
+    console.info('[雨课堂助手][INFO] 已保持竖屏桌面入口，阻止雨课堂切换到 /m/v2。');
+    return { applied: true, reason: 'portrait-desktop-entry' };
+  } catch (error) {
+    console.warn('[雨课堂助手][WARN] 无法覆盖页面视口宽度，请启用浏览器的桌面网站模式。', error);
+    return { applied: false, reason: 'viewport-override-failed' };
+  }
 }
 
 /**
@@ -46,9 +82,25 @@ function getDesktopRouteForNavigation(value, location) {
   }
 }
 
-function clearRedirectLoopMarker(targetWindow) {
+function hasRecentRedirectMarker(targetWindow, target) {
   try {
-    targetWindow?.sessionStorage?.removeItem(REDIRECT_LOOP_STORAGE_KEY);
+    const value = targetWindow?.sessionStorage?.getItem(REDIRECT_LOOP_STORAGE_KEY);
+    const marker = JSON.parse(value || 'null');
+    return marker?.target === target
+      && Number.isFinite(marker.at)
+      && Date.now() - marker.at >= 0
+      && Date.now() - marker.at < REDIRECT_LOOP_WINDOW_MS;
+  } catch {
+    return false;
+  }
+}
+
+function recordRedirectMarker(targetWindow, target) {
+  try {
+    targetWindow?.sessionStorage?.setItem(REDIRECT_LOOP_STORAGE_KEY, JSON.stringify({
+      target,
+      at: Date.now(),
+    }));
   } catch {}
 }
 
@@ -56,20 +108,17 @@ function redirectCurrentMobileRoute(targetWindow) {
   const location = targetWindow?.location;
   const target = getDesktopRouteForMobileLocation(location);
   if (!target) {
-    clearRedirectLoopMarker(targetWindow);
     return { redirected: false, reason: 'desktop-route' };
   }
 
-  try {
-    const storage = targetWindow?.sessionStorage;
-    if (storage?.getItem(REDIRECT_LOOP_STORAGE_KEY) === target) {
-      const message = '雨课堂仍将桌面页重定向到手机版。请在浏览器中启用“桌面版网站”后重新打开课程。';
-      console.warn(`[雨课堂助手][WARN] ${message}`);
-      try { targetWindow?.alert?.(message); } catch {}
-      return { redirected: false, reason: 'loop-prevented' };
-    }
-    storage?.setItem(REDIRECT_LOOP_STORAGE_KEY, target);
-  } catch {}
+  if (hasRecentRedirectMarker(targetWindow, target)) {
+    const message = '雨课堂仍将桌面页重定向到手机版。请在浏览器中启用“桌面版网站”后重新打开课程。';
+    console.warn(`[雨课堂助手][WARN] ${message}`);
+    try { targetWindow?.alert?.(message); } catch {}
+    return { redirected: false, reason: 'loop-prevented' };
+  }
+
+  recordRedirectMarker(targetWindow, target);
 
   location?.replace?.(target);
   return { redirected: true, reason: 'mobile-route' };

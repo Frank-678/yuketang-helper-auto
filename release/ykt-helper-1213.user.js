@@ -17,6 +17,9 @@
 // @match        https://www.yuketang.cn/web/*
 // @match        https://pro.yuketang.cn/web/*
 // @match        https://changjiang.yuketang.cn/web/*
+// @match        https://www.yuketang.cn/v2/web
+// @match        https://pro.yuketang.cn/v2/web
+// @match        https://changjiang.yuketang.cn/v2/web
 // @match        https://*.yuketang.cn/lesson/fullscreen/v3/*
 // @match        https://*.yuketang.cn/v2/web/*
 // @match        https://www.yuketang.cn/lesson/fullscreen/v3/*
@@ -3822,7 +3825,7 @@
     });
     if (!hasActiveProblems) root$1.style.display = "none"; else root$1.style.display = "";
   }
-  var tpl = '<div id="ykt-tutorial-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>雨课堂助手使用教程</h3>\n    <span class="close-btn" id="ykt-tutorial-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="tutorial-content">\n      <h4>工具版本</h4>\n      <p>1.21.3</p>\n\n      <h4>功能介绍</h4>\n      <p>AI雨课堂助手是一个为雨课堂提供辅助功能的工具，可以帮助你更好地参与课堂互动。</p>\n      <p>项目仓库：<a href="https://github.com/ZaytsevZY/yuketang-helper-auto" target="_blank" rel="noopener">GitHub</a></p>\n      <p>脚本安装：<a href="https://greasyfork.org/zh-CN/scripts/531469-ai%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B-%E6%A8%A1%E5%9D%97%E5%8C%96%E6%9E%84%E5%BB%BA%E7%89%88" target="_blank" rel="noopener">GreasyFork</a></p>\n\n      <h4>工具栏按钮说明</h4>\n      <ul>\n        <li><i class="fas fa-bell"></i> <b>习题提醒</b>：切换是否在新习题出现时显示通知提示（蓝色=开启）。</li>\n        <li><i class="fas fa-file-powerpoint"></i> <b>课件浏览</b>：查看课件与题目页面，提问可见内容。</li>\n        <li><i class="fas fa-robot"></i> <b>AI 解答</b>：向 AI 询问当前题目并显示建议答案。</li>\n        <li><i class="fas fa-magic-wand-sparkles"></i> <b>自动作答</b>：切换自动作答（蓝色=开启）。</li>\n        <li><i class="fas fa-cog"></i> <b>设置</b>：配置 API 密钥与自动作答参数。</li>\n        <li><i class="fas fa-question-circle"></i> <b>使用教程</b>：显示/隐藏当前教程页面。</li>\n      </ul>\n\n      <h4>自动作答</h4>\n      <ul>\n        <li>在设置中开启自动作答并配置延迟/随机延迟。</li>\n        <li>需要配置 LLM API 密钥。</li>\n        <li>答案来自 AI，结果仅供参考。</li>\n      </ul>\n\n      <h4>AI 解答</h4>\n      <ol>\n        <li>点击设置（<i class="fas fa-cog"></i>）填入 API Key。</li>\n        <li>每个 AI Profile 可单独设置 Temperature（0–2）；留空时使用模型默认值，不会发送该参数。</li>\n        <li>点击 AI 解答（<i class="fas fa-robot"></i>）后会对“当前题目/最近遇到的题目”询问并解析。</li>\n      </ol>\n\n      <h4>课堂提醒、桌面路由与亮屏</h4>\n      <ul>\n        <li>设置中可以分别控制新题、题组发布、课件发布、其他发布、下课以及自动作答的每个阶段；系统通知、页面弹窗和提示音也可单独关闭。</li>\n        <li>打开或翻阅旧课件不会触发课件发布提醒；发布类提醒只提示，不会自动作答或提交。</li>\n        <li>脚本只运行桌面端功能。若雨课堂跳转到 <code>/m/v2</code>，脚本会自动改写为对应桌面路径；若服务器仍强制跳回手机版，请在浏览器中启用“桌面版网站”。</li>\n        <li>系统通知需由浏览器或篡改猴授予权限；脚本不会自动请求或修改系统通知权限。</li>\n        <li>“课堂保持亮屏”仅在可见的课堂页防止自动熄屏，无法阻止手动锁屏、后台冻结或系统省电策略。</li>\n      </ul>\n\n      <h4>注意事项</h4>\n      <p>1) 仅供学习参考，请独立思考；</p>\n      <p>2) 合理使用 API 额度；</p>\n      <p>3) 答案不保证 100% 正确；</p>\n      <p>4) 自动作答有一定风险，谨慎开启。</p>\n\n      <h4>联系方式</h4>\n      <ul>\n        <li>请在<a href="https://github.com/ZaytsevZY/yuketang-helper-auto/issues" target="_blank" rel="noopener">GitHub Issues</a>提出问题</li>\n      </ul>\n    </div>\n  </div>\n</div>\n';
+  var tpl = '<div id="ykt-tutorial-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>雨课堂助手使用教程</h3>\n    <span class="close-btn" id="ykt-tutorial-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="tutorial-content">\n      <h4>工具版本</h4>\n      <p>1.21.3</p>\n\n      <h4>功能介绍</h4>\n      <p>AI雨课堂助手是一个为雨课堂提供辅助功能的工具，可以帮助你更好地参与课堂互动。</p>\n      <p>项目仓库：<a href="https://github.com/ZaytsevZY/yuketang-helper-auto" target="_blank" rel="noopener">GitHub</a></p>\n      <p>脚本安装：<a href="https://greasyfork.org/zh-CN/scripts/531469-ai%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B-%E6%A8%A1%E5%9D%97%E5%8C%96%E6%9E%84%E5%BB%BA%E7%89%88" target="_blank" rel="noopener">GreasyFork</a></p>\n\n      <h4>工具栏按钮说明</h4>\n      <ul>\n        <li><i class="fas fa-bell"></i> <b>习题提醒</b>：切换是否在新习题出现时显示通知提示（蓝色=开启）。</li>\n        <li><i class="fas fa-file-powerpoint"></i> <b>课件浏览</b>：查看课件与题目页面，提问可见内容。</li>\n        <li><i class="fas fa-robot"></i> <b>AI 解答</b>：向 AI 询问当前题目并显示建议答案。</li>\n        <li><i class="fas fa-magic-wand-sparkles"></i> <b>自动作答</b>：切换自动作答（蓝色=开启）。</li>\n        <li><i class="fas fa-cog"></i> <b>设置</b>：配置 API 密钥与自动作答参数。</li>\n        <li><i class="fas fa-question-circle"></i> <b>使用教程</b>：显示/隐藏当前教程页面。</li>\n      </ul>\n\n      <h4>自动作答</h4>\n      <ul>\n        <li>在设置中开启自动作答并配置延迟/随机延迟。</li>\n        <li>需要配置 LLM API 密钥。</li>\n        <li>答案来自 AI，结果仅供参考。</li>\n      </ul>\n\n      <h4>AI 解答</h4>\n      <ol>\n        <li>点击设置（<i class="fas fa-cog"></i>）填入 API Key。</li>\n        <li>每个 AI Profile 可单独设置 Temperature（0–2）；留空时使用模型默认值，不会发送该参数。</li>\n        <li>点击 AI 解答（<i class="fas fa-robot"></i>）后会对“当前题目/最近遇到的题目”询问并解析。</li>\n      </ol>\n\n      <h4>课堂提醒、桌面路由与亮屏</h4>\n      <ul>\n        <li>设置中可以分别控制新题、题组发布、课件发布、其他发布、下课以及自动作答的每个阶段；系统通知、页面弹窗和提示音也可单独关闭。</li>\n        <li>打开或翻阅旧课件不会触发课件发布提醒；发布类提醒只提示，不会自动作答或提交。</li>\n        <li>脚本只运行桌面端功能。若雨课堂跳转到 <code>/m/v2</code>，脚本会自动改写为对应桌面路径；手机竖屏的桌面首页会保持桌面宽度判定，避免雨课堂自动切回手机版。</li>\n        <li>该兼容仅处理雨课堂当前的竖屏页面判断，不伪造浏览器 User-Agent。若仍被切回 <code>/m/v2</code>，脚本会停止循环；可在浏览器网站设置中启用“桌面版网站”。</li>\n        <li>系统通知需由浏览器或篡改猴授予权限；脚本不会自动请求或修改系统通知权限。</li>\n        <li>“课堂保持亮屏”仅在可见的课堂页防止自动熄屏，无法阻止手动锁屏、后台冻结或系统省电策略。</li>\n      </ul>\n\n      <h4>注意事项</h4>\n      <p>1) 仅供学习参考，请独立思考；</p>\n      <p>2) 合理使用 API 额度；</p>\n      <p>3) 答案不保证 100% 正确；</p>\n      <p>4) 自动作答有一定风险，谨慎开启。</p>\n\n      <h4>联系方式</h4>\n      <ul>\n        <li>请在<a href="https://github.com/ZaytsevZY/yuketang-helper-auto/issues" target="_blank" rel="noopener">GitHub Issues</a>提出问题</li>\n      </ul>\n    </div>\n  </div>\n</div>\n';
   let mounted = false;
   let root;
   function $(sel) {
@@ -5539,7 +5542,9 @@
   }
   // src/core/runtime-mode.js
     const MOBILE_ROUTE_PATTERN = /^\/m\/v2(?:\/|$)/;
+  const DESKTOP_ENTRY_PATH_PATTERN = /^(?:\/|\/v2\/web(?:\/index)?\/?)$/;
   const REDIRECT_LOOP_STORAGE_KEY = "__ykt_desktop_route_guard_target__";
+  const REDIRECT_LOOP_WINDOW_MS = 15 * 1e3;
   function isMobileReminderPath(pathname = "") {
     return MOBILE_ROUTE_PATTERN.test(String(pathname));
   }
@@ -5547,6 +5552,43 @@
     const text = String(value || "");
     if (!text || text.startsWith(prefix)) return text;
     return `${prefix}${text}`;
+  }
+  function isDesktopEntryPath(pathname = "") {
+    return DESKTOP_ENTRY_PATH_PATTERN.test(String(pathname));
+  }
+  /**
+   * Rain Classroom's PC bundle sends portrait entry pages to /m/v2 when
+   * innerWidth is less than innerHeight. Keep that one bootstrap check in
+   * desktop mode without changing the browser's user agent or lesson pages.
+   */  function installDesktopViewportGuard({targetWindow: targetWindow = (typeof window !== "undefined" ? window : null)} = {}) {
+    const location = targetWindow?.location;
+    if (!isDesktopEntryPath(location?.pathname)) return {
+      applied: false,
+      reason: "not-desktop-entry"
+    };
+    const width = Number(targetWindow?.innerWidth);
+    const height = Number(targetWindow?.innerHeight);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width >= height) return {
+      applied: false,
+      reason: "not-portrait"
+    };
+    try {
+      Object.defineProperty(targetWindow, "innerWidth", {
+        configurable: true,
+        get: () => height
+      });
+      console.info("[雨课堂助手][INFO] 已保持竖屏桌面入口，阻止雨课堂切换到 /m/v2。");
+      return {
+        applied: true,
+        reason: "portrait-desktop-entry"
+      };
+    } catch (error) {
+      console.warn("[雨课堂助手][WARN] 无法覆盖页面视口宽度，请启用浏览器的桌面网站模式。", error);
+      return {
+        applied: false,
+        reason: "viewport-override-failed"
+      };
+    }
   }
   /**
    * Maps a mobile page to its desktop equivalent while preserving the page's
@@ -5569,36 +5611,42 @@
       return null;
     }
   }
-  function clearRedirectLoopMarker(targetWindow) {
+  function hasRecentRedirectMarker(targetWindow, target) {
     try {
-      targetWindow?.sessionStorage?.removeItem(REDIRECT_LOOP_STORAGE_KEY);
+      const value = targetWindow?.sessionStorage?.getItem(REDIRECT_LOOP_STORAGE_KEY);
+      const marker = JSON.parse(value || "null");
+      return marker?.target === target && Number.isFinite(marker.at) && Date.now() - marker.at >= 0 && Date.now() - marker.at < REDIRECT_LOOP_WINDOW_MS;
+    } catch {
+      return false;
+    }
+  }
+  function recordRedirectMarker(targetWindow, target) {
+    try {
+      targetWindow?.sessionStorage?.setItem(REDIRECT_LOOP_STORAGE_KEY, JSON.stringify({
+        target: target,
+        at: Date.now()
+      }));
     } catch {}
   }
   function redirectCurrentMobileRoute(targetWindow) {
     const location = targetWindow?.location;
     const target = getDesktopRouteForMobileLocation(location);
-    if (!target) {
-      clearRedirectLoopMarker(targetWindow);
+    if (!target) return {
+      redirected: false,
+      reason: "desktop-route"
+    };
+    if (hasRecentRedirectMarker(targetWindow, target)) {
+      const message = "雨课堂仍将桌面页重定向到手机版。请在浏览器中启用“桌面版网站”后重新打开课程。";
+      console.warn(`[雨课堂助手][WARN] ${message}`);
+      try {
+        targetWindow?.alert?.(message);
+      } catch {}
       return {
         redirected: false,
-        reason: "desktop-route"
+        reason: "loop-prevented"
       };
     }
-    try {
-      const storage = targetWindow?.sessionStorage;
-      if (storage?.getItem(REDIRECT_LOOP_STORAGE_KEY) === target) {
-        const message = "雨课堂仍将桌面页重定向到手机版。请在浏览器中启用“桌面版网站”后重新打开课程。";
-        console.warn(`[雨课堂助手][WARN] ${message}`);
-        try {
-          targetWindow?.alert?.(message);
-        } catch {}
-        return {
-          redirected: false,
-          reason: "loop-prevented"
-        };
-      }
-      storage?.setItem(REDIRECT_LOOP_STORAGE_KEY, target);
-    } catch {}
+    recordRedirectMarker(targetWindow, target);
     location?.replace?.(target);
     return {
       redirected: true,
@@ -5748,6 +5796,9 @@
   }
   (function main() {
     const targetWindow = gm.uw || window;
+    installDesktopViewportGuard({
+      targetWindow: targetWindow
+    });
     const guard = installDesktopRouteGuard({
       targetWindow: targetWindow,
       targetDocument: targetWindow.document || document

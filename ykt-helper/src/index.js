@@ -7,7 +7,12 @@ import { installToolbar } from './ui/toolbar.js';
 import { actions } from './state/actions.js';
 import { ui } from './ui/ui-api.js'; 
 import { gm } from './core/env.js';
-import { getRuntimeMode, installDesktopRouteGuard, shouldStartDesktopRuntime } from './core/runtime-mode.js';
+import {
+  getRuntimeMode,
+  installDesktopRouteGuard,
+  installDesktopViewportGuard,
+  shouldStartDesktopRuntime,
+} from './core/runtime-mode.js';
 
 function loadFA() {
   const link = document.createElement('link');
@@ -123,6 +128,7 @@ function installRuntimeRouteWatcher() {
 
 (function main() {
   const targetWindow = gm.uw || window;
+  installDesktopViewportGuard({ targetWindow });
   const guard = installDesktopRouteGuard({
     targetWindow,
     targetDocument: targetWindow.document || document,
