@@ -8,11 +8,15 @@ import { getRealtimeEvent } from './publish-events.js';
  */
 export function dispatchRealtimeMessage(message, {
   getRuntimeMode = () => 'desktop',
+  lessonId = null,
   handlers = {},
 } = {}) {
   const realtime = getRealtimeEvent(message);
   const notificationOnly = getRuntimeMode() === 'mobile-reminder';
   const options = { notificationOnly };
+  if (lessonId !== undefined && lessonId !== null && String(lessonId) !== '') {
+    options.lessonId = String(lessonId);
+  }
   let handled = true;
 
   switch (realtime?.kind) {
@@ -21,6 +25,9 @@ export function dispatchRealtimeMessage(message, {
       break;
     case 'unlockproblem':
       handlers.onUnlockProblem?.(realtime.problem, options);
+      break;
+    case 'danmu':
+      handlers.onDanmu?.(realtime.message, options);
       break;
     case 'publish':
       handlers.onPublishEvent?.(realtime.event, options);

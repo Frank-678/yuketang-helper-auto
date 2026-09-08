@@ -46,3 +46,27 @@ test('keeps desktop realtime events on the normal action path', async () => {
     options: { notificationOnly: false },
   }]);
 });
+
+test('routes newdanmu frames to the barrage handler', async () => {
+  const { dispatchRealtimeMessage } = await loadRealtimeDispatch();
+  const calls = [];
+
+  const result = dispatchRealtimeMessage({
+    op: 'newdanmu',
+    danmu: '跟上这条',
+    userid: 42,
+  }, {
+    lessonId: 'lesson-9',
+    handlers: {
+      onDanmu(message, options) {
+        calls.push({ message, options });
+      },
+    },
+  });
+
+  assert.equal(result.realtime.kind, 'danmu');
+  assert.deepEqual(calls, [{
+    message: { op: 'newdanmu', danmu: '跟上这条', userid: 42 },
+    options: { notificationOnly: false, lessonId: 'lesson-9' },
+  }]);
+});

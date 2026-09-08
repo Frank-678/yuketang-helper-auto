@@ -21,6 +21,8 @@ npm run dev          # 开发模式（监听文件变化）
 
 本版本修复不限时题目的 `limit` 为空时被错误判定为已过期的问题；空值、`0` 和非法时限均按“不限时”处理，正数时限仍按秒计算。
 
+课堂互动还提供可选的“重复弹幕自动跟发”：最近 7 条弹幕中同一文本出现 3 次时跟发相同文本；相邻弹幕间隔达到 60 秒重新分轮，每轮最多 2 条，同一文本每轮只跟发一次，默认关闭。
+
 ### 本地调试
 `debug/` 目录提供了本地调试环境，无需 Tampermonkey 即可运行 UI。
 ```bash
@@ -50,6 +52,8 @@ src/
 ├── core/                      # 核心配置
 │   ├── env.js                 # 环境适配器
 │   ├── reminder-preferences.js # 课堂事件与提醒方式开关
+│   ├── danmu-follow.js         # 弹幕提取、滑窗统计、分轮限额与自回显排除
+│   ├── danmu-sender.js         # 复用课堂原生弹幕输入框和发送按钮
 │   ├── realtime-dispatch.js    # 运行模式感知的实时事件分发
 │   ├── runtime-mode.js         # 桌面专用运行模式与 /m/v2 路由守卫
 │   ├── screen-wake-lock.js     # 可见课堂页的亮屏锁
@@ -87,6 +91,13 @@ src/
 - `/m/v2` 不再启动手机版运行时。脚本在 `document-start` 阶段将其改写为 `/v2/web` 对应路径，并同时拦截 SPA、链接和前进/后退导航；保留 `/m/v2` 的 Userscript 匹配规则仅用于执行这一步守卫。
 - 若服务端根据手机 User-Agent 强制重定向，页面级 Userscript 无法拦截 HTTP 跳转；守卫会防止循环，并提示用户启用浏览器“桌面版网站”。
 - 亮屏基于 Wake Lock，只在页面可见的课堂路径有效；锁屏、后台冻结和系统省电策略不在脚本可控制范围内。
+
+### 重复弹幕自动跟发
+
+- 在设置 → 课堂运行中打开“重复弹幕自动跟发”后，脚本监听课堂 WebSocket 的 `newdanmu` 事件。
+- 统计当前班级最近 7 条非空弹幕；同一文本在窗口内出现 3 次时，自动通过课堂页面的 `.send__input` 和 `.send__btn` 发送相同文本。
+- 相邻两条弹幕间隔 `< 60` 秒属于同一发送轮，间隔 `>= 60` 秒开始新轮；每轮最多跟发 2 条，同一文本每轮只跟发一次。
+- 功能默认关闭；发送框不存在、发送按钮禁用或发送失败时不会重试刷屏，也不会影响题目和课堂提醒。
 
 ## 核心功能特性
 
@@ -136,6 +147,7 @@ export const repo = {
 export const actions = {
   onPresentationLoaded(id, data),  // 课件加载完成
   onUnlockProblem(data),          // 题目解锁（融合模式分析）
+  onDanmu(data),                  // 收到课堂弹幕并按设置决定是否跟发
   handleAutoAnswer(problem),       // 自动答题（融合模式）
   navigateTo(presId, slideId),    // 导航到指定页面
   launchLessonHelper()            // 启动课堂助手

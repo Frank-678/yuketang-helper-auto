@@ -14,6 +14,8 @@ import { createEventReminder, createPublishReminder } from './publish-reminder.j
 import { screenWakeLock } from '../core/screen-wake-lock.js';
 import { isReminderEnabled } from '../core/reminder-preferences.js';
 import { getProblemEndTime } from './problem-timing.js';
+import { createDanmuFollowController } from '../core/danmu-follow.js';
+import { sendDanmuText } from '../core/danmu-sender.js';
 
 let _autoLoopStarted = false;
 let _autoJoinStarted = false;
@@ -27,6 +29,33 @@ const problemStartReminder = createEventReminder({
   notify: event => ui.notifyClassroomEvent(event),
   isEnabled: (_event, config) => isReminderEnabled('problem-start', config),
 });
+
+const danmuFollowControllers = new Map();
+
+function createDanmuFollowControllerForLesson() {
+  return createDanmuFollowController({
+    enabled: () => ui.config.autoFollowDanmu === true,
+    getCurrentUserId: getCurrentUserIdSafe,
+    send: text => sendDanmuText(text, {
+      root: (gm.uw || window).document || document,
+    }),
+  });
+}
+
+function getDanmuFollowController(lessonId) {
+  const key = String(lessonId || '__current__');
+  let controller = danmuFollowControllers.get(key);
+  if (!controller) {
+    controller = createDanmuFollowControllerForLesson();
+    danmuFollowControllers.set(key, controller);
+  }
+  return controller;
+}
+
+function currentPageLessonId() {
+  const match = String(window.location.pathname || '').match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
+  return match ? match[1] : null;
+}
 
 const AUTO_ANSWER_EVENT_META = {
   'auto-answer-scheduled': ['自动作答已排队', '脚本已为这道题安排自动作答。'],
@@ -76,6 +105,22 @@ function notifyAutoAnswer(kind, problem, detail) {
     detail: detail || defaultDetail,
     problem,
   });
+}
+
+function getCurrentUserIdSafe() {
+  const target = gm.uw || window;
+  try {
+    if (target?.YktUser?.id !== undefined && target?.YktUser?.id !== null) {
+      return target.YktUser.id;
+    }
+    const initialUserId = target?.__INITIAL_STATE__?.user?.userId;
+    if (initialUserId !== undefined && initialUserId !== null) return initialUserId;
+    const cookie = target?.document?.cookie || '';
+    const match = cookie.match(/(?:^|;\s*)user_id=(\d+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
 }
 
 // 无AI默认答案生成
@@ -339,6 +384,31 @@ export const actions = {
     return notified;
   },
 
+  onDanmu(data, options = {}) {
+    const pageLessonId = currentPageLessonId();
+    const messageLessonId = options.lessonId ? String(options.lessonId) : null;
+    if (messageLessonId && pageLessonId && messageLessonId !== pageLessonId) {
+      return { handled: true, triggered: false, reason: 'non-current-lesson', lessonId: messageLessonId };
+    }
+    if (messageLessonId && !pageLessonId) {
+      return { handled: true, triggered: false, reason: 'non-current-lesson', lessonId: messageLessonId };
+    }
+
+    const lessonId = messageLessonId || pageLessonId || repo.currentLessonId || '__current__';
+    const result = getDanmuFollowController(lessonId).handle(data, options);
+    if (result.triggered) {
+      if (result.sendResult?.sent) {
+        console.log('[雨课堂助手][INFO][DanmuFollow] 已自动跟发:', result.text, {
+          count: result.count,
+          sentCount: result.sentCount,
+        });
+      } else {
+        console.warn('[雨课堂助手][WARN][DanmuFollow] 达到跟发条件，但发送失败:', result.text, result.sendResult);
+      }
+    }
+    return result;
+  },
+
   onLessonFinished() {
     return ui.notifyClassroomEvent({
       kind: 'lesson-finished',
@@ -403,7 +473,13 @@ export const actions = {
   launchLessonHelper() {
     const path = window.location.pathname;
     const m = path.match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
-    repo.currentLessonId = m ? m[1] : null;
+    const nextLessonId = m ? m[1] : null;
+    if (repo.currentLessonId !== nextLessonId) {
+      const previousKey = String(repo.currentLessonId || '__current__');
+      danmuFollowControllers.get(previousKey)?.reset();
+      danmuFollowControllers.delete(previousKey);
+    }
+    repo.currentLessonId = nextLessonId;
     if (repo.currentLessonId) {
       console.log(`[雨课堂助手][DBG] 检测到课堂页面 lessonId: ${repo.currentLessonId}`);
     }

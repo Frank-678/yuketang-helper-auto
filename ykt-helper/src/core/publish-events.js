@@ -157,6 +157,7 @@ export function getRealtimeEvent(message) {
   const op = normalizeOp(message);
 
   if (op === 'fetchtimeline') return { kind: 'timeline', timeline: message?.timeline };
+  if (op === 'newdanmu') return { kind: 'danmu', message };
   if (op === 'unlockproblem') {
     const rawProblem = message?.problem;
     const problem = rawProblem && typeof rawProblem === 'object'

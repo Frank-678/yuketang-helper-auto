@@ -224,6 +224,7 @@
     autoAnswer: false,
     autoAnswerDelay: 3e3,
     autoAnswerRandomDelay: 2e3,
+    autoFollowDanmu: false,
     keepScreenAwake: false,
     iftex: true,
     ai: {
@@ -384,7 +385,7 @@
       setTimeout(() => el.remove(), 500);
     }, duration);
   }
-  var tpl$5 = '<div id="ykt-settings-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>AI雨课堂助手设置</h3>\n    <div class="setting-actions">\n        <button id="ykt-btn-settings-save">保存设置</button>\n        <button id="ykt-btn-settings-reset" color="red">重置为默认</button>\n    </div>\n    <span class="close-btn" id="ykt-settings-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="settings-content">\n      <div class="setting-group">\n      <h4>AI配置</h4>\n\n        \x3c!-- 当前 profile 选择 --\x3e\n        <div class="setting-item">\n          <label for="ykt-ai-profile-select">当前配置：</label>\n          <select id="ykt-ai-profile-select"></select>\n          <button id="ykt-ai-profile-add">新增配置</button>\n          <button id="ykt-ai-profile-del" color="red">删除当前</button>\n        </div>\n\n        \x3c!-- 具体配置字段：针对当前 profile --\x3e\n        <div class="setting-item">\n          <label for="ykt-ai-profile-name">名称:</label>\n          <input type="text" id="ykt-ai-profile-name" placeholder="例如：Kimi 8k / OpenAI GPT-4o">\n        </div>\n\n        <div class="setting-item">\n          <label for="ykt-ai-base-url">URL:</label>\n          <input type="text" id="ykt-ai-base-url" placeholder="https://api.moonshot.cn/...">\n          <small>兼容 OpenAI 协议的服务端，例如 api.openai.com / api.moonshot.cn / 自建代理。</small>\n        </div>\n\n        <div class="setting-item">\n          <label for="kimi-api-key">API Key:</label>\n          <input type="password" id="kimi-api-key" placeholder="输入当前配置的 API Key">\n        </div>\n\n        <div class="setting-item">\n          <label for="ykt-ai-model">文本模型 ID:</label>\n          <input type="text" id="ykt-ai-model" placeholder="例如：moonshot-v1-8k / gpt-4o-mini">\n        </div>\n\n        <div class="setting-item">\n          <label for="ykt-ai-vision-model">图像模型 ID:</label>\n          <input type="text" id="ykt-ai-vision-model" placeholder="默认不填则与文本模型相同">\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-temperature">Temperature:</label>\n          <input type="number" id="ykt-ai-temperature" min="0" max="2" step="0.01" placeholder="留空则不传">\n          <small>当前 Profile 专用。留空时不发送该参数，由模型决定默认值；部分 Kimi 模型要求留空。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-ocr-api">OCR模型API:</label>\n          <input type="text" id="ykt-ai-ocr-api" placeholder="留空则复用当前 AI Profile 的 URL">\n          <small>仅用于课件“文字识别”功能；留空时走当前 AI Profile。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-ocr-api-key">OCR API Key:</label>\n          <input type="password" id="ykt-ai-ocr-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">\n          <small>仅用于课件 OCR；不填时自动回退到当前 AI Profile 的 API Key。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-translate-api">翻译模型API:</label>\n          <input type="text" id="ykt-ai-translate-api" placeholder="留空则复用当前 AI Profile 的 URL">\n          <small>仅用于 OCR 结果翻译；留空时复用当前 AI Profile 的 URL。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-translate-api-key">翻译 API Key:</label>\n          <input type="password" id="ykt-ai-translate-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">\n          <small>仅用于 OCR 结果翻译；留空时复用当前 AI Profile 的 API Key。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-translate-model">翻译模型 ID:</label>\n          <input type="text" id="ykt-ai-translate-model" placeholder="留空则复用当前 AI Profile 的文本模型">\n          <small>建议填写纯文本模型；留空时复用当前 AI Profile 的文本模型。</small>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>UI设置</h4>\n          <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-ui-tex">\n            <span class="checkmark"></span>\n            渲染LaTeX格式的公式\n          </label>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>自动作答设置</h4>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-join">\n            <span class="checkmark"></span>\n            自动进入课堂\n          </label>\n          <small>默认自动进入“正在上课”的课堂。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-join-auto-answer">\n            <span class="checkmark"></span>\n            对于自动进入的课堂，默认使用自动答题\n          </label>\n          <small>仅对“自动进入”的课堂生效，不会影响手动进入课堂的行为。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-answer">\n            <span class="checkmark"></span>\n            启用自动作答\n          </label>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-ai-auto-analyze">\n            <span class="checkmark"></span>\n            打开 AI 页面时自动分析\n          </label>\n          <small>开启后，进入“AI 解答”面板即自动向 AI 询问当前题目</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-answer-delay">作答延迟时间 (秒):</label>\n          <input type="number" id="ykt-input-answer-delay" min="1" max="60">\n          <small>题目出现后等待多长时间开始作答</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-random-delay">随机延迟范围 (秒):</label>\n          <input type="number" id="ykt-input-random-delay" min="0" max="30">\n          <small>在基础延迟基础上随机增加的时间范围</small>\n        </div><div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-ai-pick-main-first">\n            <span class="checkmark"></span>\n            主界面优先（未勾选则课件浏览优先）\n          </label>\n          <small>仅在普通打开 AI 面板（ykt:open-ai）时生效；从“提问当前PPT”跳转保持最高优先。</small>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>课堂提醒</h4>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-all" />\n            <span class="checkmark"></span>\n            总提醒开关\n          </label>\n          <small>关闭后，下面每一种课堂事件都会静音；工具栏铃铛与此开关同步。</small>\n        </div>\n        <h5>提醒事件</h5>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-problem-start" />\n            <span class="checkmark"></span>\n            新题 / 答题开始\n          </label>\n          <small>老师开启一道可作答习题时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-assessment-publish" />\n            <span class="checkmark"></span>\n            考试/测试题组发布提醒\n          </label>\n          <small>老师发布测试、考试或题组时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-courseware-publish" />\n            <span class="checkmark"></span>\n            课件发布提醒\n          </label>\n          <small>只在发布新课件时提醒；翻阅旧课件和翻页不会提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-other-publish" />\n            <span class="checkmark"></span>\n            其他无法分类的发布提醒\n          </label>\n          <small>用于不同学校服务器的未知发布事件；若提醒过多可单独关闭。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-lesson-finished" />\n            <span class="checkmark"></span>\n            课程结束提醒\n          </label>\n          <small>老师结束当前课程时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-scheduled" />\n            <span class="checkmark"></span>\n            自动作答已排队\n          </label>\n          <small>脚本为新题安排延迟作答时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-started" />\n            <span class="checkmark"></span>\n            自动作答开始\n          </label>\n          <small>脚本开始执行本地或 AI 作答流程时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-succeeded" />\n            <span class="checkmark"></span>\n            自动作答成功\n          </label>\n          <small>答案提交成功时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-failed" />\n            <span class="checkmark"></span>\n            自动作答失败\n          </label>\n          <small>截图、AI 分析或答案提交失败时提醒。</small>\n        </div>\n        <h5>提醒方式</h5>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-native" />\n            <span class="checkmark"></span>\n            系统通知\n          </label>\n          <small>调用浏览器或篡改猴的原生通知。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-popup" />\n            <span class="checkmark"></span>\n            页面弹窗\n          </label>\n          <small>在当前页面右下角显示提醒卡片。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-sound" />\n            <span class="checkmark"></span>\n            提示声音\n          </label>\n          <small>播放内置或自定义提示音。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-notify-duration">弹窗持续时间 (秒):</label>\n          <input type="number" id="ykt-input-notify-duration" min="2" max="60" />\n          <small>习题出现时，弹窗在屏幕上的停留时长</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-notify-volume">提醒音量 (0-100):</label>\n          <input type="number" id="ykt-input-notify-volume" min="0" max="100" />\n          <small>用于提示音的音量大小；建议 30~80</small>\n        </div>\n        <div class="setting-item">\n          <button id="ykt-btn-test-notify">测试习题提醒</button>\n        </div>\n        <div class="setting-item">\n          <label>自定义提示音（其一即可）</label>\n          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">\n            <input type="file" id="ykt-input-notify-audio-file" accept="audio/*" />\n            <input type="text" id="ykt-input-notify-audio-url" placeholder="或粘贴在线音频 URL（http/https/data:）" style="min-width:260px"/>\n            <button id="ykt-btn-apply-audio-url">应用URL</button>\n            <button id="ykt-btn-preview-audio">预览</button>\n            <button id="ykt-btn-clear-audio">清除自定义音频</button>\n          </div>\n          <small id="ykt-tip-audio-name" style="display:block;opacity:.8;margin-top:6px"></small>\n          <small>说明：文件将本地存储为 data URL（默认上限 2MB）。URL 需支持跨域访问；若被浏览器拦截自动播放，请先点击“预览”以授权音频播放。</small>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>课堂运行</h4>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-keep-screen-awake" />\n            <span class="checkmark"></span>\n            课堂保持亮屏（仅防自动熄屏）\n          </label>\n          <small>仅在课堂页且页面可见时生效。无法阻止手动锁屏、切换到后台后的浏览器冻结；省电模式也可能拒绝该功能。</small>\n        </div>\n      </div>\n    </div>\n  </div>\n</div>\n';
+  var tpl$5 = '<div id="ykt-settings-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>AI雨课堂助手设置</h3>\n    <div class="setting-actions">\n        <button id="ykt-btn-settings-save">保存设置</button>\n        <button id="ykt-btn-settings-reset" color="red">重置为默认</button>\n    </div>\n    <span class="close-btn" id="ykt-settings-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="settings-content">\n      <div class="setting-group">\n      <h4>AI配置</h4>\n\n        \x3c!-- 当前 profile 选择 --\x3e\n        <div class="setting-item">\n          <label for="ykt-ai-profile-select">当前配置：</label>\n          <select id="ykt-ai-profile-select"></select>\n          <button id="ykt-ai-profile-add">新增配置</button>\n          <button id="ykt-ai-profile-del" color="red">删除当前</button>\n        </div>\n\n        \x3c!-- 具体配置字段：针对当前 profile --\x3e\n        <div class="setting-item">\n          <label for="ykt-ai-profile-name">名称:</label>\n          <input type="text" id="ykt-ai-profile-name" placeholder="例如：Kimi 8k / OpenAI GPT-4o">\n        </div>\n\n        <div class="setting-item">\n          <label for="ykt-ai-base-url">URL:</label>\n          <input type="text" id="ykt-ai-base-url" placeholder="https://api.moonshot.cn/...">\n          <small>兼容 OpenAI 协议的服务端，例如 api.openai.com / api.moonshot.cn / 自建代理。</small>\n        </div>\n\n        <div class="setting-item">\n          <label for="kimi-api-key">API Key:</label>\n          <input type="password" id="kimi-api-key" placeholder="输入当前配置的 API Key">\n        </div>\n\n        <div class="setting-item">\n          <label for="ykt-ai-model">文本模型 ID:</label>\n          <input type="text" id="ykt-ai-model" placeholder="例如：moonshot-v1-8k / gpt-4o-mini">\n        </div>\n\n        <div class="setting-item">\n          <label for="ykt-ai-vision-model">图像模型 ID:</label>\n          <input type="text" id="ykt-ai-vision-model" placeholder="默认不填则与文本模型相同">\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-temperature">Temperature:</label>\n          <input type="number" id="ykt-ai-temperature" min="0" max="2" step="0.01" placeholder="留空则不传">\n          <small>当前 Profile 专用。留空时不发送该参数，由模型决定默认值；部分 Kimi 模型要求留空。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-ocr-api">OCR模型API:</label>\n          <input type="text" id="ykt-ai-ocr-api" placeholder="留空则复用当前 AI Profile 的 URL">\n          <small>仅用于课件“文字识别”功能；留空时走当前 AI Profile。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-ocr-api-key">OCR API Key:</label>\n          <input type="password" id="ykt-ai-ocr-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">\n          <small>仅用于课件 OCR；不填时自动回退到当前 AI Profile 的 API Key。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-translate-api">翻译模型API:</label>\n          <input type="text" id="ykt-ai-translate-api" placeholder="留空则复用当前 AI Profile 的 URL">\n          <small>仅用于 OCR 结果翻译；留空时复用当前 AI Profile 的 URL。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-translate-api-key">翻译 API Key:</label>\n          <input type="password" id="ykt-ai-translate-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">\n          <small>仅用于 OCR 结果翻译；留空时复用当前 AI Profile 的 API Key。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-translate-model">翻译模型 ID:</label>\n          <input type="text" id="ykt-ai-translate-model" placeholder="留空则复用当前 AI Profile 的文本模型">\n          <small>建议填写纯文本模型；留空时复用当前 AI Profile 的文本模型。</small>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>UI设置</h4>\n          <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-ui-tex">\n            <span class="checkmark"></span>\n            渲染LaTeX格式的公式\n          </label>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>自动作答设置</h4>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-join">\n            <span class="checkmark"></span>\n            自动进入课堂\n          </label>\n          <small>默认自动进入“正在上课”的课堂。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-join-auto-answer">\n            <span class="checkmark"></span>\n            对于自动进入的课堂，默认使用自动答题\n          </label>\n          <small>仅对“自动进入”的课堂生效，不会影响手动进入课堂的行为。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-answer">\n            <span class="checkmark"></span>\n            启用自动作答\n          </label>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-ai-auto-analyze">\n            <span class="checkmark"></span>\n            打开 AI 页面时自动分析\n          </label>\n          <small>开启后，进入“AI 解答”面板即自动向 AI 询问当前题目</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-answer-delay">作答延迟时间 (秒):</label>\n          <input type="number" id="ykt-input-answer-delay" min="1" max="60">\n          <small>题目出现后等待多长时间开始作答</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-random-delay">随机延迟范围 (秒):</label>\n          <input type="number" id="ykt-input-random-delay" min="0" max="30">\n          <small>在基础延迟基础上随机增加的时间范围</small>\n        </div><div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-ai-pick-main-first">\n            <span class="checkmark"></span>\n            主界面优先（未勾选则课件浏览优先）\n          </label>\n          <small>仅在普通打开 AI 面板（ykt:open-ai）时生效；从“提问当前PPT”跳转保持最高优先。</small>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>课堂提醒</h4>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-all" />\n            <span class="checkmark"></span>\n            总提醒开关\n          </label>\n          <small>关闭后，下面每一种课堂事件都会静音；工具栏铃铛与此开关同步。</small>\n        </div>\n        <h5>提醒事件</h5>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-problem-start" />\n            <span class="checkmark"></span>\n            新题 / 答题开始\n          </label>\n          <small>老师开启一道可作答习题时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-assessment-publish" />\n            <span class="checkmark"></span>\n            考试/测试题组发布提醒\n          </label>\n          <small>老师发布测试、考试或题组时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-courseware-publish" />\n            <span class="checkmark"></span>\n            课件发布提醒\n          </label>\n          <small>只在发布新课件时提醒；翻阅旧课件和翻页不会提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-other-publish" />\n            <span class="checkmark"></span>\n            其他无法分类的发布提醒\n          </label>\n          <small>用于不同学校服务器的未知发布事件；若提醒过多可单独关闭。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-lesson-finished" />\n            <span class="checkmark"></span>\n            课程结束提醒\n          </label>\n          <small>老师结束当前课程时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-scheduled" />\n            <span class="checkmark"></span>\n            自动作答已排队\n          </label>\n          <small>脚本为新题安排延迟作答时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-started" />\n            <span class="checkmark"></span>\n            自动作答开始\n          </label>\n          <small>脚本开始执行本地或 AI 作答流程时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-succeeded" />\n            <span class="checkmark"></span>\n            自动作答成功\n          </label>\n          <small>答案提交成功时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-failed" />\n            <span class="checkmark"></span>\n            自动作答失败\n          </label>\n          <small>截图、AI 分析或答案提交失败时提醒。</small>\n        </div>\n        <h5>提醒方式</h5>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-native" />\n            <span class="checkmark"></span>\n            系统通知\n          </label>\n          <small>调用浏览器或篡改猴的原生通知。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-popup" />\n            <span class="checkmark"></span>\n            页面弹窗\n          </label>\n          <small>在当前页面右下角显示提醒卡片。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-sound" />\n            <span class="checkmark"></span>\n            提示声音\n          </label>\n          <small>播放内置或自定义提示音。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-notify-duration">弹窗持续时间 (秒):</label>\n          <input type="number" id="ykt-input-notify-duration" min="2" max="60" />\n          <small>习题出现时，弹窗在屏幕上的停留时长</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-notify-volume">提醒音量 (0-100):</label>\n          <input type="number" id="ykt-input-notify-volume" min="0" max="100" />\n          <small>用于提示音的音量大小；建议 30~80</small>\n        </div>\n        <div class="setting-item">\n          <button id="ykt-btn-test-notify">测试习题提醒</button>\n        </div>\n        <div class="setting-item">\n          <label>自定义提示音（其一即可）</label>\n          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">\n            <input type="file" id="ykt-input-notify-audio-file" accept="audio/*" />\n            <input type="text" id="ykt-input-notify-audio-url" placeholder="或粘贴在线音频 URL（http/https/data:）" style="min-width:260px"/>\n            <button id="ykt-btn-apply-audio-url">应用URL</button>\n            <button id="ykt-btn-preview-audio">预览</button>\n            <button id="ykt-btn-clear-audio">清除自定义音频</button>\n          </div>\n          <small id="ykt-tip-audio-name" style="display:block;opacity:.8;margin-top:6px"></small>\n          <small>说明：文件将本地存储为 data URL（默认上限 2MB）。URL 需支持跨域访问；若被浏览器拦截自动播放，请先点击“预览”以授权音频播放。</small>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>课堂运行</h4>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-follow-danmu" />\n            <span class="checkmark"></span>\n            重复弹幕自动跟发\n          </label>\n          <small>开启后，当前班级最近 7 条弹幕中同一文本出现 3 次时自动跟发 1 条；相邻弹幕间隔达到 60 秒视为新一轮，每轮最多跟发 2 条，同一文本每轮只跟发一次。需要课堂弹幕输入框可用。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-keep-screen-awake" />\n            <span class="checkmark"></span>\n            课堂保持亮屏（仅防自动熄屏）\n          </label>\n          <small>仅在课堂页且页面可见时生效。无法阻止手动锁屏、切换到后台后的浏览器冻结；省电模式也可能拒绝该功能。</small>\n        </div>\n      </div>\n    </div>\n  </div>\n</div>\n';
   function defaultNavigator() {
     if (typeof window !== "undefined") return window.navigator;
     return typeof globalThis !== "undefined" ? globalThis.navigator : null;
@@ -631,6 +632,7 @@
     const $notifyNative = root$4.querySelector("#ykt-input-notify-native");
     const $notifyPopup = root$4.querySelector("#ykt-input-notify-popup");
     const $notifySound = root$4.querySelector("#ykt-input-notify-sound");
+    const $autoFollowDanmu = root$4.querySelector("#ykt-input-auto-follow-danmu");
     const $keepScreenAwake = root$4.querySelector("#ykt-input-keep-screen-awake");
     const $iftex = root$4.querySelector("#ykt-ui-tex");
     const $audioFile = root$4.querySelector("#ykt-input-notify-audio-file");
@@ -734,6 +736,7 @@
       $notifyDur.value = Math.floor((ui.config.notifyPopupDuration || 5e3) / 1e3);
       $notifyVol.value = Math.round(100 * (ui.config.notifyVolume ?? .6));
       syncReminderForm(reminderFields, ui.config);
+      $autoFollowDanmu.checked = !!ui.config.autoFollowDanmu;
       $keepScreenAwake.checked = !!ui.config.keepScreenAwake;
       $audioName.textContent = ui.config.customNotifyAudioName ? `当前：${ui.config.customNotifyAudioName}` : "当前：使用内置“叮-咚”提示音";
     }
@@ -781,6 +784,7 @@
       ui.config.notifyPopupDuration = Math.max(2e3, (+$notifyDur.value || 0) * 1e3);
       ui.config.notifyVolume = Math.max(0, Math.min(1, (+$notifyVol.value || 60) / 100));
       Object.assign(ui.config, readReminderForm(reminderFields));
+      ui.config.autoFollowDanmu = !!$autoFollowDanmu.checked;
       ui.config.keepScreenAwake = !!$keepScreenAwake.checked;
       ui.saveConfig();
       document.getElementById("ykt-btn-bell")?.classList.toggle("active", ui.config.notifyProblems);
@@ -3848,7 +3852,7 @@
     });
     if (!hasActiveProblems) root$1.style.display = "none"; else root$1.style.display = "";
   }
-  var tpl = '<div id="ykt-tutorial-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>雨课堂助手使用教程</h3>\n    <span class="close-btn" id="ykt-tutorial-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="tutorial-content">\n      <h4>工具版本</h4>\n      <p>1.21.4</p>\n\n      <h4>功能介绍</h4>\n      <p>AI雨课堂助手是一个为雨课堂提供辅助功能的工具，可以帮助你更好地参与课堂互动。</p>\n      <p>项目仓库：<a href="https://github.com/ZaytsevZY/yuketang-helper-auto" target="_blank" rel="noopener">GitHub</a></p>\n      <p>脚本安装：<a href="https://greasyfork.org/zh-CN/scripts/531469-ai%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B-%E6%A8%A1%E5%9D%97%E5%8C%96%E6%9E%84%E5%BB%BA%E7%89%88" target="_blank" rel="noopener">GreasyFork</a></p>\n\n      <h4>工具栏按钮说明</h4>\n      <ul>\n        <li><i class="fas fa-bell"></i> <b>习题提醒</b>：切换是否在新习题出现时显示通知提示（蓝色=开启）。</li>\n        <li><i class="fas fa-file-powerpoint"></i> <b>课件浏览</b>：查看课件与题目页面，提问可见内容。</li>\n        <li><i class="fas fa-robot"></i> <b>AI 解答</b>：向 AI 询问当前题目并显示建议答案。</li>\n        <li><i class="fas fa-magic-wand-sparkles"></i> <b>自动作答</b>：切换自动作答（蓝色=开启）。</li>\n        <li><i class="fas fa-cog"></i> <b>设置</b>：配置 API 密钥与自动作答参数。</li>\n        <li><i class="fas fa-question-circle"></i> <b>使用教程</b>：显示/隐藏当前教程页面。</li>\n      </ul>\n\n      <h4>自动作答</h4>\n      <ul>\n        <li>在设置中开启自动作答并配置延迟/随机延迟。</li>\n        <li>需要配置 LLM API 密钥。</li>\n        <li>答案来自 AI，结果仅供参考。</li>\n      </ul>\n\n      <h4>AI 解答</h4>\n      <ol>\n        <li>点击设置（<i class="fas fa-cog"></i>）填入 API Key。</li>\n        <li>每个 AI Profile 可单独设置 Temperature（0–2）；留空时使用模型默认值，不会发送该参数。</li>\n        <li>点击 AI 解答（<i class="fas fa-robot"></i>）后会对“当前题目/最近遇到的题目”询问并解析。</li>\n      </ol>\n\n      <h4>课堂提醒、桌面路由与亮屏</h4>\n      <ul>\n        <li>设置中可以分别控制新题、题组发布、课件发布、其他发布、下课以及自动作答的每个阶段；系统通知、页面弹窗和提示音也可单独关闭。</li>\n        <li>打开或翻阅旧课件不会触发课件发布提醒；发布类提醒只提示，不会自动作答或提交。</li>\n        <li>脚本只运行桌面端功能。若雨课堂跳转到 <code>/m/v2</code>，脚本会自动改写为对应桌面路径；若服务器仍强制跳回手机版，请在浏览器中启用“桌面版网站”。</li>\n        <li>系统通知需由浏览器或篡改猴授予权限；脚本不会自动请求或修改系统通知权限。</li>\n        <li>“课堂保持亮屏”仅在可见的课堂页防止自动熄屏，无法阻止手动锁屏、后台冻结或系统省电策略。</li>\n      </ul>\n\n      <h4>注意事项</h4>\n      <p>1) 仅供学习参考，请独立思考；</p>\n      <p>2) 合理使用 API 额度；</p>\n      <p>3) 答案不保证 100% 正确；</p>\n      <p>4) 自动作答有一定风险，谨慎开启。</p>\n\n      <h4>联系方式</h4>\n      <ul>\n        <li>请在<a href="https://github.com/ZaytsevZY/yuketang-helper-auto/issues" target="_blank" rel="noopener">GitHub Issues</a>提出问题</li>\n      </ul>\n    </div>\n  </div>\n</div>\n';
+  var tpl = '<div id="ykt-tutorial-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>雨课堂助手使用教程</h3>\n    <span class="close-btn" id="ykt-tutorial-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="tutorial-content">\n      <h4>工具版本</h4>\n      <p>1.21.4</p>\n\n      <h4>功能介绍</h4>\n      <p>AI雨课堂助手是一个为雨课堂提供辅助功能的工具，可以帮助你更好地参与课堂互动。</p>\n      <p>项目仓库：<a href="https://github.com/ZaytsevZY/yuketang-helper-auto" target="_blank" rel="noopener">GitHub</a></p>\n      <p>脚本安装：<a href="https://greasyfork.org/zh-CN/scripts/531469-ai%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B-%E6%A8%A1%E5%9D%97%E5%8C%96%E6%9E%84%E5%BB%BA%E7%89%88" target="_blank" rel="noopener">GreasyFork</a></p>\n\n      <h4>工具栏按钮说明</h4>\n      <ul>\n        <li><i class="fas fa-bell"></i> <b>习题提醒</b>：切换是否在新习题出现时显示通知提示（蓝色=开启）。</li>\n        <li><i class="fas fa-file-powerpoint"></i> <b>课件浏览</b>：查看课件与题目页面，提问可见内容。</li>\n        <li><i class="fas fa-robot"></i> <b>AI 解答</b>：向 AI 询问当前题目并显示建议答案。</li>\n        <li><i class="fas fa-magic-wand-sparkles"></i> <b>自动作答</b>：切换自动作答（蓝色=开启）。</li>\n        <li><i class="fas fa-cog"></i> <b>设置</b>：配置 API 密钥与自动作答参数。</li>\n        <li><i class="fas fa-question-circle"></i> <b>使用教程</b>：显示/隐藏当前教程页面。</li>\n      </ul>\n\n      <h4>自动作答</h4>\n      <ul>\n        <li>在设置中开启自动作答并配置延迟/随机延迟。</li>\n        <li>需要配置 LLM API 密钥。</li>\n        <li>答案来自 AI，结果仅供参考。</li>\n      </ul>\n\n      <h4>AI 解答</h4>\n      <ol>\n        <li>点击设置（<i class="fas fa-cog"></i>）填入 API Key。</li>\n        <li>每个 AI Profile 可单独设置 Temperature（0–2）；留空时使用模型默认值，不会发送该参数。</li>\n        <li>点击 AI 解答（<i class="fas fa-robot"></i>）后会对“当前题目/最近遇到的题目”询问并解析。</li>\n      </ol>\n\n      <h4>课堂提醒、桌面路由与亮屏</h4>\n      <ul>\n        <li>设置中可以分别控制新题、题组发布、课件发布、其他发布、下课以及自动作答的每个阶段；系统通知、页面弹窗和提示音也可单独关闭。</li>\n        <li>打开或翻阅旧课件不会触发课件发布提醒；发布类提醒只提示，不会自动作答或提交。</li>\n        <li>在“课堂运行”中打开“重复弹幕自动跟发”后，最近 7 条弹幕内同一文本出现 3 次会跟发 1 条；相邻弹幕间隔达到 60 秒算新一轮，每轮最多 2 条，同一文本每轮只跟发一次。功能默认关闭。</li>\n        <li>脚本只运行桌面端功能。若雨课堂跳转到 <code>/m/v2</code>，脚本会自动改写为对应桌面路径；若服务器仍强制跳回手机版，请在浏览器中启用“桌面版网站”。</li>\n        <li>系统通知需由浏览器或篡改猴授予权限；脚本不会自动请求或修改系统通知权限。</li>\n        <li>“课堂保持亮屏”仅在可见的课堂页防止自动熄屏，无法阻止手动锁屏、后台冻结或系统省电策略。</li>\n      </ul>\n\n      <h4>注意事项</h4>\n      <p>1) 仅供学习参考，请独立思考；</p>\n      <p>2) 合理使用 API 额度；</p>\n      <p>3) 答案不保证 100% 正确；</p>\n      <p>4) 自动作答有一定风险，谨慎开启。</p>\n\n      <h4>联系方式</h4>\n      <ul>\n        <li>请在<a href="https://github.com/ZaytsevZY/yuketang-helper-auto/issues" target="_blank" rel="noopener">GitHub Issues</a>提出问题</li>\n      </ul>\n    </div>\n  </div>\n</div>\n';
   let mounted = false;
   let root;
   function $(sel) {
@@ -4562,7 +4566,7 @@
   const ASSESSMENT_PUBLISH_ACTION = /^(send|publish|start|release)/;
   const ENTITY_KEYS = [ "quiz", "exam", "test", "exercise", "paper", "problemGroup", "problem_group", "problem", "presentation", "courseware", "activity" ];
   const NESTED_PAYLOAD_KEYS = [ "data", "payload", "result", "content" ];
-  function normalizeOp(message) {
+  function normalizeOp$1(message) {
     return String(message?.op || message?.type || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   }
   function includesOneOf(value, markers) {
@@ -4632,7 +4636,7 @@
     return null;
   }
   function classifyPublishEvent(message) {
-    const op = normalizeOp(message);
+    const op = normalizeOp$1(message);
     const category = getCategory(op);
     if (!category) return null;
     const entity = getEntity(message);
@@ -4660,10 +4664,14 @@
     return kind ? isReminderEnabled(kind, config) : false;
   }
   function getRealtimeEvent(message) {
-    const op = normalizeOp(message);
+    const op = normalizeOp$1(message);
     if (op === "fetchtimeline") return {
       kind: "timeline",
       timeline: message?.timeline
+    };
+    if (op === "newdanmu") return {
+      kind: "danmu",
+      message: message
     };
     if (op === "unlockproblem") {
       const rawProblem = message?.problem;
@@ -4715,6 +4723,286 @@
       isEnabled: options.isEnabled || isPublishReminderEnabled
     });
   }
+  function dispatchInputEvent(input, type) {
+    if (typeof input?.dispatchEvent !== "function") return;
+    const EventCtor = input.ownerDocument?.defaultView?.Event || globalThis.Event;
+    try {
+      input.dispatchEvent(typeof EventCtor === "function" ? new EventCtor(type, {
+        bubbles: true
+      }) : {
+        type: type,
+        bubbles: true
+      });
+    } catch {
+      try {
+        input.dispatchEvent({
+          type: type,
+          bubbles: true
+        });
+      } catch {}
+    }
+  }
+  function setInputValue(input, text) {
+    const valueDescriptor = (() => {
+      let current = input;
+      while (current) {
+        const descriptor = Object.getOwnPropertyDescriptor(current, "value");
+        if (descriptor) return descriptor;
+        current = Object.getPrototypeOf(current);
+      }
+      return null;
+    })();
+    if (typeof valueDescriptor?.set === "function") valueDescriptor.set.call(input, text); else if ("value" in input) input.value = text; else input.textContent = text;
+    dispatchInputEvent(input, "input");
+    dispatchInputEvent(input, "change");
+  }
+  /** Send one text through the native classroom barrage controls. */  function sendDanmuText(text, {root: root = globalThis.document} = {}) {
+    if (typeof text !== "string" || !text.trim()) return {
+      sent: false,
+      text: text,
+      reason: "empty"
+    };
+    try {
+      const input = root?.querySelector?.(".send__input");
+      const button = root?.querySelector?.(".send__btn");
+      if (!input || !button) return {
+        sent: false,
+        text: text,
+        reason: "controls-unavailable"
+      };
+      if (button.disabled || button.getAttribute?.("aria-disabled") === "true") return {
+        sent: false,
+        text: text,
+        reason: "send-disabled"
+      };
+      setInputValue(input, text);
+      if (typeof button.click !== "function") return {
+        sent: false,
+        text: text,
+        reason: "send-unavailable"
+      };
+      button.click();
+      return {
+        sent: true,
+        text: text
+      };
+    } catch (error) {
+      return {
+        sent: false,
+        text: text,
+        reason: "send-error",
+        error: error
+      };
+    }
+  }
+  const DEFAULTS = {
+    windowSize: 7,
+    threshold: 3,
+    roundGapMs: 6e4,
+    maxSendsPerRound: 2
+  };
+  function normalizeOp(message) {
+    return String(message?.op || message?.type || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+  function finitePositive(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : fallback;
+  }
+  /** Extract the native Rain Classroom newdanmu payload without changing text. */  function extractDanmuMessage(message) {
+    if (normalizeOp(message) !== "newdanmu") return null;
+    const candidates = [ message ];
+    for (const key of [ "msg", "data", "message", "payload" ]) {
+      const candidate = message?.[key];
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) candidates.push(candidate);
+    }
+    const payload = candidates.find(candidate => typeof candidate?.danmu === "string");
+    if (!payload) return null;
+    const text = payload.danmu;
+    const rawUserId = candidates.map(candidate => candidate?.userid ?? candidate?.userId ?? candidate?.user_id ?? candidate?.uid).find(value => value !== void 0 && value !== null);
+    return {
+      text: text,
+      userId: rawUserId === void 0 || rawUserId === null ? null : String(rawUserId)
+    };
+  }
+  /**
+   * Tracks one classroom's barrage stream.
+   * A round continues while each adjacent non-empty message is less than the
+   * configured gap apart.  The detector only remembers the latest windowSize
+   * messages and emits at most one trigger per text and maxSendsPerRound total.
+   */  function createDanmuFollowTracker(options = {}) {
+    const windowSize = Math.max(1, Math.floor(finitePositive(options.windowSize, DEFAULTS.windowSize)));
+    const threshold = Math.max(1, Math.floor(finitePositive(options.threshold, DEFAULTS.threshold)));
+    const roundGapMs = finitePositive(options.roundGapMs, DEFAULTS.roundGapMs);
+    const maxSendsPerRound = Math.max(0, Math.floor(Number.isFinite(Number(options.maxSendsPerRound)) ? Number(options.maxSendsPerRound) : DEFAULTS.maxSendsPerRound));
+    let messages = [];
+    let lastAt = null;
+    let sentCount = 0;
+    let followedTexts = new Set;
+    function reset() {
+      messages = [];
+      lastAt = null;
+      sentCount = 0;
+      followedTexts = new Set;
+    }
+    function result(triggered, text, count, reason) {
+      const payload = {
+        triggered: triggered,
+        text: text,
+        count: count,
+        sentCount: sentCount
+      };
+      if (reason) payload.reason = reason;
+      return payload;
+    }
+    function observe(text, at = Date.now()) {
+      if (typeof text !== "string" || !text.trim()) return result(false, text, 0, "empty");
+      const timestamp = Number(at);
+      const now = Number.isFinite(timestamp) ? timestamp : Date.now();
+      if (lastAt !== null && now - lastAt >= roundGapMs) reset();
+      messages.push({
+        text: text,
+        at: now
+      });
+      if (messages.length > windowSize) messages = messages.slice(-windowSize);
+      lastAt = now;
+      const count = messages.reduce((total, item) => total + (item.text === text ? 1 : 0), 0);
+      if (count < threshold) return result(false, text, count, "threshold");
+      if (followedTexts.has(text)) return result(false, text, count, "already-followed");
+      if (sentCount >= maxSendsPerRound) return result(false, text, count, "round-limit");
+      followedTexts.add(text);
+      sentCount += 1;
+      return result(true, text, count);
+    }
+    return {
+      observe: observe,
+      reset: reset,
+      getSnapshot() {
+        return {
+          messages: messages.slice(),
+          lastAt: lastAt,
+          sentCount: sentCount,
+          followedTexts: new Set(followedTexts)
+        };
+      }
+    };
+  }
+  /**
+   * Connects the protocol parser, tracker, and page sender while keeping own
+   * echoes out of the class-wide message stream.
+   */  function createDanmuFollowController(options = {}) {
+    const tracker = options.tracker || createDanmuFollowTracker(options);
+    const enabled = options.enabled === void 0 ? () => true : options.enabled;
+    const send = options.send || (text => sendDanmuText(text));
+    const getCurrentUserId = options.getCurrentUserId || (() => null);
+    const getNow = options.now || (() => Date.now());
+    const ownEchoTtlMs = finitePositive(options.ownEchoTtlMs, 1e4);
+    const pendingOwn = new Map;
+    function isEnabled() {
+      try {
+        return typeof enabled === "function" ? enabled() !== false : enabled !== false;
+      } catch {
+        return false;
+      }
+    }
+    function currentUserId() {
+      try {
+        const value = getCurrentUserId();
+        return value === void 0 || value === null || String(value).trim() === "" ? null : String(value);
+      } catch {
+        return null;
+      }
+    }
+    function rememberOwn(text, at) {
+      pendingOwn.set(text, {
+        at: at,
+        count: (pendingOwn.get(text)?.count || 0) + 1
+      });
+    }
+    function consumeOwnEcho(text, at) {
+      const pending = pendingOwn.get(text);
+      if (!pending) return false;
+      if (at - pending.at > ownEchoTtlMs || at < pending.at) {
+        pendingOwn.delete(text);
+        return false;
+      }
+      if (pending.count <= 1) pendingOwn.delete(text); else pending.count -= 1;
+      return true;
+    }
+    function handle(message, {notificationOnly: notificationOnly = false} = {}) {
+      const parsed = extractDanmuMessage(message);
+      if (!parsed) return {
+        handled: false,
+        triggered: false,
+        reason: "not-danmu"
+      };
+      if (notificationOnly) return {
+        handled: true,
+        triggered: false,
+        text: parsed.text,
+        reason: "notification-only"
+      };
+      if (!isEnabled()) {
+        tracker.reset();
+        pendingOwn.clear();
+        return {
+          handled: true,
+          triggered: false,
+          text: parsed.text,
+          reason: "disabled"
+        };
+      }
+      const rawNow = Number(getNow());
+      const now = Number.isFinite(rawNow) ? rawNow : Date.now();
+      const ownId = currentUserId();
+      if (ownId !== null && parsed.userId !== null && ownId === parsed.userId) return {
+        handled: true,
+        triggered: false,
+        text: parsed.text,
+        reason: "own"
+      };
+      if (parsed.userId === null && consumeOwnEcho(parsed.text, now)) return {
+        handled: true,
+        triggered: false,
+        text: parsed.text,
+        reason: "own-echo"
+      };
+      const observation = tracker.observe(parsed.text, now);
+      if (!observation.triggered) return {
+        handled: true,
+        ...observation
+      };
+      let sendResult;
+      try {
+        sendResult = send(parsed.text);
+      } catch (error) {
+        sendResult = {
+          sent: false,
+          text: parsed.text,
+          reason: "send-error",
+          error: error
+        };
+      }
+      if (sendResult === true || sendResult?.sent === true) rememberOwn(parsed.text, now);
+      return {
+        handled: true,
+        ...observation,
+        sendResult: sendResult
+      };
+    }
+    return {
+      handle: handle,
+      reset() {
+        tracker.reset();
+        pendingOwn.clear();
+      },
+      getSnapshot() {
+        return {
+          tracker: tracker.getSnapshot?.(),
+          pendingOwn: new Map(pendingOwn)
+        };
+      }
+    };
+  }
   // src/state/actions.js
     let _autoLoopStarted = false;
   let _autoJoinStarted = false;
@@ -4728,6 +5016,29 @@
     notify: event => ui.notifyClassroomEvent(event),
     isEnabled: (_event, config) => isReminderEnabled("problem-start", config)
   });
+  const danmuFollowControllers = new Map;
+  function createDanmuFollowControllerForLesson() {
+    return createDanmuFollowController({
+      enabled: () => ui.config.autoFollowDanmu === true,
+      getCurrentUserId: getCurrentUserIdSafe,
+      send: text => sendDanmuText(text, {
+        root: (gm.uw || window).document || document
+      })
+    });
+  }
+  function getDanmuFollowController(lessonId) {
+    const key = String(lessonId);
+    let controller = danmuFollowControllers.get(key);
+    if (!controller) {
+      controller = createDanmuFollowControllerForLesson();
+      danmuFollowControllers.set(key, controller);
+    }
+    return controller;
+  }
+  function currentPageLessonId() {
+    const match = String(window.location.pathname || "").match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
+    return match ? match[1] : null;
+  }
   const AUTO_ANSWER_EVENT_META = {
     "auto-answer-scheduled": [ "自动作答已排队", "脚本已为这道题安排自动作答。" ],
     "auto-answer-started": [ "自动作答开始", "脚本正在处理这道题。" ],
@@ -4760,6 +5071,19 @@
       detail: detail || defaultDetail,
       problem: problem
     });
+  }
+  function getCurrentUserIdSafe() {
+    const target = gm.uw || window;
+    try {
+      if (target?.YktUser?.id !== void 0 && target?.YktUser?.id !== null) return target.YktUser.id;
+      const initialUserId = target?.__INITIAL_STATE__?.user?.userId;
+      if (initialUserId !== void 0 && initialUserId !== null) return initialUserId;
+      const cookie = target?.document?.cookie || "";
+      const match = cookie.match(/(?:^|;\s*)user_id=(\d+)/);
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
   }
   // 无AI默认答案生成
     function makeDefaultAnswer(problem) {
@@ -4965,6 +5289,29 @@
       if (notified) console.log("[雨课堂助手][INFO][Publish] 已提醒发布事件:", event.category, event.dedupeKey);
       return notified;
     },
+    onDanmu(data, options = {}) {
+      const pageLessonId = currentPageLessonId();
+      const messageLessonId = options.lessonId ? String(options.lessonId) : null;
+      if (messageLessonId && pageLessonId && messageLessonId !== pageLessonId) return {
+        handled: true,
+        triggered: false,
+        reason: "non-current-lesson",
+        lessonId: messageLessonId
+      };
+      if (messageLessonId && !pageLessonId) return {
+        handled: true,
+        triggered: false,
+        reason: "non-current-lesson",
+        lessonId: messageLessonId
+      };
+      const lessonId = messageLessonId || pageLessonId || repo.currentLessonId || "__current__";
+      const result = getDanmuFollowController(lessonId).handle(data, options);
+      if (result.triggered) if (result.sendResult?.sent) console.log("[雨课堂助手][INFO][DanmuFollow] 已自动跟发:", result.text, {
+        count: result.count,
+        sentCount: result.sentCount
+      }); else console.warn("[雨课堂助手][WARN][DanmuFollow] 达到跟发条件，但发送失败:", result.text, result.sendResult);
+      return result;
+    },
     onLessonFinished() {
       return ui.notifyClassroomEvent({
         kind: "lesson-finished",
@@ -5032,7 +5379,13 @@
     launchLessonHelper() {
       const path = window.location.pathname;
       const m = path.match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
-      repo.currentLessonId = m ? m[1] : null;
+      const nextLessonId = m ? m[1] : null;
+      if (repo.currentLessonId !== nextLessonId) {
+        const previousKey = String(repo.currentLessonId || "__current__");
+        danmuFollowControllers.get(previousKey)?.reset();
+        danmuFollowControllers.delete(previousKey);
+      }
+      repo.currentLessonId = nextLessonId;
       if (repo.currentLessonId) console.log(`[雨课堂助手][DBG] 检测到课堂页面 lessonId: ${repo.currentLessonId}`);
       if (typeof window.GM_getTab === "function" && typeof window.GM_saveTab === "function" && repo.currentLessonId) window.GM_getTab(tab => {
         tab.type = "lesson";
@@ -5275,12 +5628,13 @@
    * Converts a raw realtime frame into an action call without coupling the
    * protocol parser to the action layer.  The current userscript runs only the
    * desktop runtime, while this option remains available for protocol tests.
-   */  function dispatchRealtimeMessage(message, {getRuntimeMode: getRuntimeMode = () => "desktop", handlers: handlers = {}} = {}) {
+   */  function dispatchRealtimeMessage(message, {getRuntimeMode: getRuntimeMode = () => "desktop", lessonId: lessonId = null, handlers: handlers = {}} = {}) {
     const realtime = getRealtimeEvent(message);
     const notificationOnly = getRuntimeMode() === "mobile-reminder";
     const options = {
       notificationOnly: notificationOnly
     };
+    if (lessonId !== void 0 && lessonId !== null && String(lessonId) !== "") options.lessonId = String(lessonId);
     let handled = true;
     switch (realtime?.kind) {
      case "timeline":
@@ -5289,6 +5643,10 @@
 
      case "unlockproblem":
       handlers.onUnlockProblem?.(realtime.problem, options);
+      break;
+
+     case "danmu":
+      handlers.onDanmu?.(realtime.message, options);
       break;
 
      case "publish":
@@ -5309,7 +5667,15 @@
     };
   }
   // src/net/ws-interceptor.js
-    function installWSInterceptor({getRuntimeMode: getRuntimeMode = () => "desktop"} = {}) {
+    function lessonIdFromPath(pathname = "") {
+    const match = String(pathname).match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
+    return match ? match[1] : null;
+  }
+  function getSocketLessonId(ws) {
+    if (ws?.__yktLessonId) return String(ws.__yktLessonId);
+    return lessonIdFromPath((gm.uw || window)?.location?.pathname || location.pathname);
+  }
+  function installWSInterceptor({getRuntimeMode: getRuntimeMode = () => "desktop"} = {}) {
     // 环境识别（标准/荷塘/长江/未知），主要用于日志和后续按需适配
     function detectEnvironmentAndAdaptAPI() {
       const hostname = location.hostname;
@@ -5375,6 +5741,7 @@
           console.log("[雨课堂助手][INFO] WebSocket接收:", message);
           const dispatched = dispatchRealtimeMessage(message, {
             getRuntimeMode: getRuntimeMode,
+            lessonId: getSocketLessonId(ws),
             handlers: {
               onFetchTimeline(timeline, options) {
                 console.log("[雨课堂助手][INFO] 收到时间线:", message.timeline);
@@ -5383,6 +5750,10 @@
               onUnlockProblem(problem, options) {
                 console.log("[雨课堂助手][INFO] 收到解锁问题:", message.problem);
                 actions.onUnlockProblem(problem, options);
+              },
+              onDanmu(danmu, options) {
+                console.log("[雨课堂助手][INFO] 收到弹幕:", danmu?.danmu);
+                actions.onDanmu(danmu, options);
               },
               onPublishEvent(event, options) {
                 console.log("[雨课堂助手][INFO] 收到课堂发布:", event);
@@ -5439,6 +5810,7 @@
     // 根据当前域名选择 ws 地址
         const host = "wss://" + location.hostname + "/wsapp/";
     const ws = new WebSocket(host);
+    ws.__yktLessonId = String(lessonId);
     ws.addEventListener("open", () => {
       try {
         const hello = {

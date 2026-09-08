@@ -14,6 +14,7 @@ export const DEFAULT_CONFIG = {
   autoAnswer: false,
   autoAnswerDelay: 3000,
   autoAnswerRandomDelay: 2000,
+  autoFollowDanmu: false,
   keepScreenAwake: false,
   iftex: true,
   ai: {

@@ -4,6 +4,16 @@ import { actions } from '../state/actions.js';
 import { repo } from '../state/repo.js';
 import { dispatchRealtimeMessage } from '../core/realtime-dispatch.js';
 
+function lessonIdFromPath(pathname = '') {
+  const match = String(pathname).match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
+  return match ? match[1] : null;
+}
+
+function getSocketLessonId(ws) {
+  if (ws?.__yktLessonId) return String(ws.__yktLessonId);
+  return lessonIdFromPath((gm.uw || window)?.location?.pathname || location.pathname);
+}
+
 export function installWSInterceptor({ getRuntimeMode = () => 'desktop' } = {}) {
 
   // 环境识别（标准/荷塘/长江/未知），主要用于日志和后续按需适配
@@ -70,6 +80,7 @@ MyWebSocket.addHandler((ws, url) => {
         console.log('[雨课堂助手][INFO] WebSocket接收:', message);
         const dispatched = dispatchRealtimeMessage(message, {
           getRuntimeMode,
+          lessonId: getSocketLessonId(ws),
           handlers: {
             onFetchTimeline(timeline, options) {
               console.log('[雨课堂助手][INFO] 收到时间线:', message.timeline);
@@ -78,6 +89,10 @@ MyWebSocket.addHandler((ws, url) => {
             onUnlockProblem(problem, options) {
               console.log('[雨课堂助手][INFO] 收到解锁问题:', message.problem);
               actions.onUnlockProblem(problem, options);
+            },
+            onDanmu(danmu, options) {
+              console.log('[雨课堂助手][INFO] 收到弹幕:', danmu?.danmu);
+              actions.onDanmu(danmu, options);
             },
             onPublishEvent(event, options) {
               console.log('[雨课堂助手][INFO] 收到课堂发布:', event);
@@ -129,6 +144,7 @@ export function connectOrAttachLessonWS({ lessonId, auth }) {
   const host = "wss://" + location.hostname + "/wsapp/";
 
   const ws = new WebSocket(host);
+  ws.__yktLessonId = String(lessonId);
 
   ws.addEventListener('open', () => {
     try {

@@ -97,6 +97,7 @@ export function mountSettingsPanel() {
   const $notifyNative = root.querySelector('#ykt-input-notify-native');
   const $notifyPopup = root.querySelector('#ykt-input-notify-popup');
   const $notifySound = root.querySelector('#ykt-input-notify-sound');
+  const $autoFollowDanmu = root.querySelector('#ykt-input-auto-follow-danmu');
   const $keepScreenAwake = root.querySelector('#ykt-input-keep-screen-awake');
   const $iftex = root.querySelector('#ykt-ui-tex');
 
@@ -213,6 +214,7 @@ export function mountSettingsPanel() {
     $notifyDur.value = Math.floor((ui.config.notifyPopupDuration || 5000) / 1000);
     $notifyVol.value = Math.round(100 * (ui.config.notifyVolume ?? 0.6));
     syncReminderForm(reminderFields, ui.config);
+    $autoFollowDanmu.checked = !!ui.config.autoFollowDanmu;
     $keepScreenAwake.checked = !!ui.config.keepScreenAwake;
     $audioName.textContent = ui.config.customNotifyAudioName
       ? `当前：${ui.config.customNotifyAudioName}`
@@ -268,6 +270,7 @@ export function mountSettingsPanel() {
     ui.config.notifyPopupDuration = Math.max(2000, (+$notifyDur.value || 0) * 1000);
     ui.config.notifyVolume = Math.max(0, Math.min(1, (+$notifyVol.value || 60) / 100));
     Object.assign(ui.config, readReminderForm(reminderFields));
+    ui.config.autoFollowDanmu = !!$autoFollowDanmu.checked;
     ui.config.keepScreenAwake = !!$keepScreenAwake.checked;
 
     ui.saveConfig();
