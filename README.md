@@ -5,8 +5,8 @@
   <a href="https://github.com/ZaytsevZY/yuketang-helper-auto/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="license"/>
   </a>
-  <a href="./release/ykt-helper-1213.user.js">
-    <img src="https://img.shields.io/badge/version-1.21.3-blue.svg" alt="版本">
+  <a href="./release/ykt-helper-1214.user.js">
+    <img src="https://img.shields.io/badge/version-1.21.4-blue.svg" alt="版本">
   </a>
   <a href="#">
     <img src="https://img.shields.io/badge/platform-Chrome%20%7C%20Edge-green.svg" alt="适配平台">
@@ -26,7 +26,7 @@
     </h3>
 </html>
 
-> 最后更新时间：2026.09.07
+> 最后更新时间：2026.09.08
 
 ## 项目说明
 
@@ -48,7 +48,7 @@
   - 使用edge，你需要打开**拓展-管理拓展-开发者模式**，再开启篡改猴插件中的**允许注入脚本**和**允许访问文件URL权限**
   - 使用chrome，你需要打开 **（右上角三点）-拓展程序-管理拓展程序-开发者模式**，再开启插件面板中的**允许运行用户脚本**和**允许访问文件网址**
 
-- 可直接[安装上游正式的 1.21.3 发布脚本](https://raw.githubusercontent.com/ZaytsevZY/yuketang-helper-auto/main/release/ykt-helper-1213.user.js)。
+- 可直接[安装此 fork 的 1.21.4 发布脚本](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper-1214.user.js)。
 
 - 也可以[安装 GreasyFork 的稳定版本](https://update.greasyfork.org/scripts/531469/AI%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B.user.js)；它通常不是最新版本。
 
@@ -60,7 +60,7 @@
 
 - 或手动创建新脚本，将 `release/ykt-helper-<版本号>.user.js` 的内容复制到篡改猴的新建脚本中。
 
-- 当前构建版本为 `1.21.3`，支持：
+- 当前构建版本为 `1.21.4`，支持：
 
   - `148.0.7778.98-chrome`及以下的chrome
 
@@ -99,6 +99,8 @@
 - 若启用“系统通知”，还需要在 Edge/浏览器的应用通知设置中允许通知；脚本不会自行申请或改变系统权限。
 
 - 可选开启“课堂保持亮屏”，仅在可见的课堂页防止自动熄屏；手动锁屏、切换后台后的冻结和系统省电限制无法绕过。
+
+- 修复不限时题目因空的 `limit` 被计算为 `0` 而立即过期的问题；不限时题目现在可继续自动作答，活动题目列表显示为“不限时”。
 
 - 若要查看这堂课的所有习题信息，可以点击工具栏的「查看课件和幻灯片」 :receipt: 图标。
 
@@ -206,6 +208,8 @@
 请在[更新记录](./changelog.md)中查看详细的更新记录。
 
 ---
+
+- 1.21.4: 修复不限时题目因空 `limit` 被判定为立即过期，恢复不限时题目的自动作答并在活动题目列表中显示“不限时”
 
 - 1.21.3: 汇总 Profile Temperature、入口页与桌面专用 `/m/v2` 路由守卫、细分课堂提醒、发布事件去重与误报修复、课堂保持亮屏
 
