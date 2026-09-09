@@ -246,32 +246,6 @@
 #ykt-problem-list .problem-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }
 #ykt-problem-list .problem-done{ color: #0a7a2f; font-weight: 600; }
 
-/* ===== 活动题目列表（右下角小卡片） ===== */
-#ykt-active-problems-panel.ykt-active-wrapper{
-  position: fixed; right: 20px; bottom: 60px; z-index: var(--ykt-z);
-}
-#ykt-active-problems{ display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow: auto; }
-#ykt-active-problems .active-problem-card{
-  position: relative;
-  width: 320px; background: #fff; border: 1px solid var(--ykt-border);
-  border-radius: 8px; box-shadow: var(--ykt-shadow); padding: 10px;
-}
-#ykt-active-problems .ap-close{
-  position: absolute; top: 6px; right: 6px;
-  width: 20px; height: 20px; border-radius: 999px;
-  border: 1px solid var(--ykt-border-strong);
-  background: #fff; color: #555;
-  cursor: pointer; padding: 0; font-size: 14px; line-height: 16px;
-}
-#ykt-active-problems .ap-close:hover{ color: #111; border-color: var(--ykt-accent); }
-#ykt-active-problems .ap-title{ font-weight: 600; margin-bottom: 4px; padding-right: 28px; }
-#ykt-active-problems .ap-info{ color: #666; font-size: 12px; margin-bottom: 8px; }
-#ykt-active-problems .ap-actions{ display: flex; gap: 8px; }
-#ykt-active-problems .ap-actions button{
-  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;
-}
-#ykt-active-problems .ap-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }
-
 /* ===== 教程面板 (#ykt-tutorial-panel) ===== */
 #ykt-tutorial-panel .tutorial-content h4{ margin: 8px 0 6px; }
 #ykt-tutorial-panel .tutorial-content p,
