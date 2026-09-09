@@ -2609,7 +2609,9 @@
       renderSharedResult();
       return;
     }
-    �开始";
+    const state = ocrResults.get(currentSlideId);
+    if (!state) {
+      statusEl.textContent = "未开始";
       statusEl.className = "ocr-status";
       tipEl.textContent = "当前页还没有识别结果。";
       renderSharedResult();
