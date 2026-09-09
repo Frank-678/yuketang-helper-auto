@@ -1050,6 +1050,38 @@ export function updateSlideView() {
       });
       box.appendChild(opts);
     }
+
+    const problemActions = document.createElement('div');
+    problemActions.className = 'problem-actions';
+    const forceAI = document.createElement('button');
+    forceAI.type = 'button';
+    forceAI.textContent = 'AI 强制作答';
+    forceAI.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const status = repo.problemStatus.get(String(prob.problemId)) || repo.problemStatus.get(prob.problemId);
+      const endTime = Number(status?.endTime ?? prob.endTime);
+      const expired = Number.isFinite(endTime) && Date.now() >= endTime;
+      if (expired && !window.confirm('这道题已过截止时间，AI 将使用强制补交接口。继续吗？')) return;
+      forceAI.disabled = true;
+      try {
+        const result = await actions.forceAIAnswer(prob.problemId, { forceRetry: expired });
+        if (!result?.ok) ui.toast(`AI 强制作答未完成：${result?.error?.message || result?.reason || '未知原因'}`, 4000);
+      } finally {
+        forceAI.disabled = false;
+        updateSlideView();
+      }
+    });
+    problemActions.appendChild(forceAI);
+
+    const editAnswer = document.createElement('button');
+    editAnswer.type = 'button';
+    editAnswer.textContent = '编辑/补交';
+    editAnswer.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      window.dispatchEvent(new CustomEvent('ykt:open-problem-list', { detail: { problemId: prob.problemId } }));
+    });
+    problemActions.appendChild(editAnswer);
+    box.appendChild(problemActions);
     problemView.appendChild(box);
   }
 

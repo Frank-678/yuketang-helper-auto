@@ -1,6 +1,7 @@
 // src/state/actions.js
 import { PROBLEM_TYPE_MAP } from '../core/types.js';
 import { randInt, gm } from '../core/env.js'
+import { storage } from '../core/storage.js';
 import { repo } from './repo.js';
 import { ui } from '../ui/ui-api.js';
 import { submitAnswer, retryAnswer } from '../tsm/answer.js';;
@@ -14,6 +15,9 @@ import { createEventReminder, createPublishReminder } from './publish-reminder.j
 import { screenWakeLock } from '../core/screen-wake-lock.js';
 import { isReminderEnabled } from '../core/reminder-preferences.js';
 import { getProblemEndTime } from './problem-timing.js';
+import { createProblemRecoveryStore, shouldRecoverProblem } from './auto-answer-recovery.js';
+import { createAutoAnswerRunner } from './auto-answer-runner.js';
+import { buildAnswerSubmitOptions } from './answer-editor.js';
 import { createDanmuFollowController } from '../core/danmu-follow.js';
 import { sendDanmuText } from '../core/danmu-sender.js';
 
@@ -22,6 +26,8 @@ let _autoJoinStarted = false;
 let _autoOnLessonClickStarted = false;
 let _autoOnLessonClickInProgress = false;
 let _routerHooked = false;
+let _problemRecoveryStore = null;
+let _problemRecoveryLessonId = null;
 const publishReminder = createPublishReminder({
   notify: event => ui.notifyPublish(event),
 });
@@ -141,6 +147,187 @@ function makeDefaultAnswer(problem) {
   }
 }
 
+function problemIdKey(problemId) {
+  return problemId === undefined || problemId === null ? null : String(problemId);
+}
+
+function getProblemById(problemId) {
+  const key = problemIdKey(problemId);
+  if (!key) return null;
+  return repo.problems.get(problemId)
+    || repo.problems.get(key)
+    || repo.problems.get(Number.isNaN(Number(key)) ? key : Number(key))
+    || null;
+}
+
+function getProblemStatus(problemId) {
+  const key = problemIdKey(problemId);
+  if (!key) return null;
+  return repo.problemStatus.get(problemId)
+    || repo.problemStatus.get(key)
+    || repo.problemStatus.get(Number.isNaN(Number(key)) ? key : Number(key))
+    || null;
+}
+
+function getProblemRecoveryStore() {
+  const lessonId = repo.currentLessonId;
+  if (!lessonId) return null;
+  const key = String(lessonId);
+  if (!_problemRecoveryStore || _problemRecoveryLessonId !== key) {
+    _problemRecoveryLessonId = key;
+    _problemRecoveryStore = createProblemRecoveryStore({ storage, lessonId: key });
+  }
+  return _problemRecoveryStore;
+}
+
+function statusPhase(status) {
+  if (status?.phase === 'queued' || status?.phase === 'answering' || status?.phase === 'failed') {
+    return status.phase;
+  }
+  if (status?.answering) return 'answering';
+  if (status?.done) return 'done';
+  return 'queued';
+}
+
+function persistProblemStatus(problemId, status, problem = getProblemById(problemId)) {
+  const store = getProblemRecoveryStore();
+  if (!store || !status) return;
+  if (status.done || problem?.result) {
+    store.remove(problemId);
+    return;
+  }
+
+  store.upsert({
+    problemId: problemIdKey(problemId),
+    presentationId: status.presentationId,
+    slideId: status.slideId,
+    startTime: status.startTime,
+    endTime: status.endTime,
+    phase: statusPhase(status),
+    autoAnswerTime: status.autoAnswerTime,
+    autoAnswerQueued: status.autoAnswerQueued === true,
+    attempts: status.attempts,
+    lastError: status.lastError,
+    done: false,
+  });
+}
+
+function statusFromRecoveryRecord(record) {
+  const phase = record.phase === 'failed' ? 'failed' : 'queued';
+  return {
+    presentationId: record.presentationId,
+    slideId: record.slideId,
+    startTime: record.startTime,
+    endTime: record.endTime,
+    done: false,
+    autoAnswerTime: null,
+    answering: false,
+    phase,
+    autoAnswerQueued: record.autoAnswerQueued !== false,
+    attempts: record.attempts || 0,
+    lastError: record.lastError || '',
+    recoveredFrom: record.phase,
+    recoveryForceRetry: false,
+  };
+}
+
+function createStatusForProblem(problem, { autoAnswerQueued = false } = {}) {
+  return {
+    presentationId: problem?.presentationId || null,
+    slideId: problem?.slideId || null,
+    startTime: problem?.startTime ?? null,
+    endTime: problem?.endTime ?? null,
+    done: !!problem?.result,
+    autoAnswerTime: null,
+    answering: false,
+    phase: 'queued',
+    autoAnswerQueued,
+    attempts: 0,
+    lastError: '',
+    recoveryForceRetry: false,
+  };
+}
+
+function ensureProblemStatus(problem, { autoAnswerQueued = false } = {}) {
+  if (!problem?.problemId) return null;
+  const pid = problemIdKey(problem.problemId);
+  let status = getProblemStatus(pid);
+  if (!status) {
+    const recovered = getProblemRecoveryStore()?.get(pid);
+    status = recovered
+      ? statusFromRecoveryRecord(recovered)
+      : createStatusForProblem(problem, { autoAnswerQueued });
+    repo.problemStatus.set(pid, status);
+  }
+  return status;
+}
+
+function scheduleRecoveredStatus(status, decision, now = Date.now()) {
+  if (!status || !decision?.recover) return;
+  status.autoAnswerTime = now;
+  status.recoveryForceRetry = !!decision.forceRetry;
+  status.autoAnswerQueued = true;
+  status.phase = 'queued';
+}
+
+function restorePendingProblemStatuses() {
+  const store = getProblemRecoveryStore();
+  if (!store) return 0;
+
+  const now = Date.now();
+  let restored = 0;
+  for (const record of store.list()) {
+    const problem = getProblemById(record.problemId);
+    if (!problem) continue;
+    if (record.done || record.phase === 'done' || problem.result) {
+      store.remove(record.problemId);
+      continue;
+    }
+
+    const status = statusFromRecoveryRecord(record);
+    const decision = shouldRecoverProblem(record, {
+      enabled: ui.config.autoRecoverUnanswered === true,
+      recoverExpired: ui.config.autoRecoverExpired === true,
+      now,
+    });
+    scheduleRecoveredStatus(status, decision, now);
+    repo.problemStatus.set(record.problemId, status);
+    if (decision.recover) persistProblemStatus(record.problemId, status, problem);
+    restored++;
+  }
+
+  if (ui.config.autoScanUnanswered === true) {
+    for (const encountered of repo.encounteredProblems || []) {
+      const problem = getProblemById(encountered.problemId);
+      const pid = problemIdKey(encountered.problemId);
+      if (!problem || !pid || problem.result || getProblemStatus(pid)) continue;
+      const status = createStatusForProblem({
+        ...problem,
+        presentationId: encountered.presentationId,
+        slideId: encountered.slideId || encountered.slide?.id,
+      }, { autoAnswerQueued: true });
+      const decision = shouldRecoverProblem(status, {
+        enabled: true,
+        recoverExpired: ui.config.autoRecoverExpired === true,
+        now,
+      });
+      scheduleRecoveredStatus(status, decision, now);
+      repo.problemStatus.set(pid, status);
+      if (decision.recover) persistProblemStatus(pid, status, problem);
+      restored++;
+    }
+  }
+
+  if (restored) ui.updateActiveProblems();
+  return restored;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('ykt:auto-answer-config-changed', () => {
+    restorePendingProblemStatuses();
+  });
+}
+
 export function hasActiveAIProfile(aiCfg) {
   const cfg = aiCfg || {};
   const profiles = Array.isArray(cfg.profiles) ? cfg.profiles : [];
@@ -153,133 +340,37 @@ export function hasActiveAIProfile(aiCfg) {
   return !!cfg.kimiApiKey;
 }
 
-// 融合模式自动答题
-async function handleAutoAnswerInternal(problem) {
-  const status = repo.problemStatus.get(problem.problemId);
-  if (!status || status.answering || problem.result) {
-    console.log('[AutoAnswer] 跳过：', {
-      hasStatus: !!status,
-      answering: status?.answering,
-      hasResult: !!problem.result
-    });
-    return;
-  }
-  
-  if (Number.isFinite(status.endTime) && Date.now() >= status.endTime) {
-    console.log('[雨课堂助手][WARN][AutoAnswer] 跳过：已超时');
-    return;
-  }
+const autoAnswerRunner = createAutoAnswerRunner({
+  typeMap: PROBLEM_TYPE_MAP,
+  hasActiveProfile,
+  getAIConfig: () => ui.config.ai,
+  makeDefaultAnswer,
+  captureSlideImage,
+  captureProblemForVision,
+  formatProblemForVision,
+  queryAIVision,
+  parseAIAnswer,
+  submitAnswer,
+  onAnswered: (problem, result) => actions.onAnswerProblem(problem.problemId, result),
+  onStatusChange: (status, problem) => persistProblemStatus(problem?.problemId, status, problem),
+  notify: notifyAutoAnswer,
+  toast: (message, timeout) => ui.toast(message, timeout),
+  showPopup: showAutoAnswerPopup,
+});
 
-  status.answering = true;
-  notifyAutoAnswer('auto-answer-started', problem);
-
-  try {
-    console.log('[雨课堂助手][INFO][AutoAnswer] =================================');
-    console.log('[雨课堂助手][INFO][AutoAnswer] 开始自动答题');
-    console.log('[雨课堂助手][INFO][AutoAnswer] 题目ID:', problem.problemId);
-    console.log('[雨课堂助手][INFO][AutoAnswer] 题目类型:', PROBLEM_TYPE_MAP[problem.problemType]);
-    console.log('[雨课堂助手][INFO][AutoAnswer] 题目内容:', problem.body?.slice(0, 50) + '...');
-    
-    if (!hasActiveAIProfile(ui.config.ai)) {
-    // ✅ 无 API Key：使用本地默认答案直接提交，确保流程不中断
-    // 
-      const parsed = makeDefaultAnswer(problem);
-      console.log('[雨课堂助手][WARN][AutoAnswer] 无 API Key，使用本地默认答案:', JSON.stringify(parsed));
-
-      // 提交答案（根据时限自动选择 answer/retry 逻辑）
-      await submitAnswer(problem, parsed, {
-        startTime: status.startTime,
-        endTime: status.endTime,
-        forceRetry: false,
-        lessonId: repo.currentLessonId,
-      });
-
-      // 更新状态与UI
-      actions.onAnswerProblem(problem.problemId, parsed);
-      status.done = true;
-      status.answering = false;
-      notifyAutoAnswer('auto-answer-succeeded', problem, '这道题已使用本地默认答案提交。');
-
-      ui.toast('使用默认答案完成作答（未配置 API Key）', 3000);
-      showAutoAnswerPopup(problem, '（本地默认答案：无 API Key）');
-
-      console.log('[雨课堂助手][INFO][AutoAnswer] 默认答案提交流程结束');
-      return; // 提前返回，避免继续走图像+AI流程
-    }
-
-    const slideId = status.slideId;
-    console.log('[雨课堂助手][INFO][AutoAnswer] 题目所在幻灯片:', slideId);
-    console.log('[雨课堂助手][INFO][AutoAnswer] =================================');
-    console.log('[雨课堂助手][INFO][AutoAnswer] 使用融合模式分析（文本+幻灯片图片）...');
-    
-    let imageBase64 = await captureSlideImage(slideId);
-    
-    // 如果获取幻灯片图片失败，回退到DOM截图
-    if (!imageBase64) {
-      console.log('[雨课堂助手][WARN][AutoAnswer] 无法获取幻灯片图片，尝试使用DOM截图...');
-      const fallbackImage = await captureProblemForVision();
-      
-      if (!fallbackImage) {
-        status.answering = false;
-        console.error('[雨课堂助手][ERR][AutoAnswer] 所有截图方法都失败');
-        notifyAutoAnswer('auto-answer-failed', problem, '无法获取题目图像，已跳过自动作答。');
-        return ui.toast('无法获取题目图像，跳过自动作答', 3000);
-      }
-      
-      imageBase64 = fallbackImage;
-      console.log('[雨课堂助手][INFO][AutoAnswer] DOM截图成功');
-    } else {
-      console.log('[雨课堂助手][INFO][AutoAnswer] 幻灯片图片获取成功');
-    }
-    
-    // 构建提示
-    const hasTextInfo = problem.body && problem.body.trim();
-    const textPrompt = formatProblemForVision(problem, PROBLEM_TYPE_MAP, hasTextInfo);
-    
-    // 调用 AI
-    ui.toast('AI 正在分析题目...', 2000);
-    const aiAnswer = await queryAIVision(imageBase64, textPrompt, ui.config.ai);
-    console.log('[雨课堂助手][INFO][AutoAnswer] AI回答:', aiAnswer);
-    
-    // 解析答案
-    const parsed = parseAIAnswer(problem, aiAnswer);
-    console.log('[雨课堂助手][INFO][AutoAnswer] 解析结果:', parsed);
-    
-    if (!parsed) {
-      status.answering = false;
-      console.error('[雨课堂助手][ERR][AutoAnswer] 解析失败，AI回答格式不正确');
-      notifyAutoAnswer('auto-answer-failed', problem, '无法解析 AI 返回的答案，已跳过自动作答。');
-      return ui.toast('无法解析AI答案，请检查格式', 3000);
-    }
-
-    console.log('[雨课堂助手][INFO][AutoAnswer] 准备提交答案:', JSON.stringify(parsed));
-    
-    // 提交答案
-    await submitAnswer(problem, parsed, {
-      startTime: status.startTime,
-      endTime: status.endTime,
-      forceRetry: false,
-      lessonId: repo.currentLessonId
-    });
-    
-    console.log('[雨课堂助手][INFO][AutoAnswer] 提交成功');
-    
-    // 更新状态
-    actions.onAnswerProblem(problem.problemId, parsed);
-    status.done = true;
-    status.answering = false;
-    notifyAutoAnswer('auto-answer-succeeded', problem);
-    
-    ui.toast(`自动作答完成`, 3000);
-    showAutoAnswerPopup(problem, aiAnswer);
-    
-  } catch (e) {
-    console.error('[雨课堂助手][ERR][AutoAnswer] 失败:', e);
-    console.error('[雨课堂助手][ERR][AutoAnswer] 错误堆栈:', e.stack);
-    status.answering = false;
-    notifyAutoAnswer('auto-answer-failed', problem, `自动作答失败：${e?.message || '未知错误'}`);
-    ui.toast(`自动作答失败: ${e.message}`, 4000);
-  }
+// 融合模式自动答题；force=true 用于刷新恢复和用户手动重试。
+async function handleAutoAnswerInternal(problem, options = {}) {
+  if (!problem?.problemId) return { ok: false, reason: 'missing-problem' };
+  const status = options.status || getProblemStatus(problem.problemId);
+  if (!status && !options.force) return { ok: false, reason: 'missing-status' };
+  const ensuredStatus = status || ensureProblemStatus(problem, { autoAnswerQueued: false });
+  return autoAnswerRunner.run(problem, ensuredStatus, {
+    force: options.force === true,
+    forceRetry: options.forceRetry === true,
+    allowResubmit: options.allowResubmit === true,
+    source: options.source || (options.force ? 'manual' : 'auto'),
+    lessonId: repo.currentLessonId,
+  });
 }
 
 export function startAutoAnswerLoop() {
@@ -290,10 +381,16 @@ export function startAutoAnswerLoop() {
     const now = Date.now();
     repo.problemStatus.forEach((status, pid) => {
       if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-        const problem = repo.problems.get(pid);
+        const problem = getProblemById(pid);
         if (problem && !problem.result) {
           status.autoAnswerTime = null;
-          handleAutoAnswerInternal(problem);
+          persistProblemStatus(pid, status, problem);
+          handleAutoAnswerInternal(problem, {
+            status,
+            force: status.recoveryForceRetry === true,
+            forceRetry: status.recoveryForceRetry === true,
+            source: status.recoveryForceRetry === true ? 'recovery' : 'auto',
+          });
         }
       }
     });
@@ -310,13 +407,14 @@ export const actions = {
   onPresentationLoaded(id, data) {
     repo.setPresentation(id, data);
     const pres = repo.presentations.get(id);
-    for (const slide of pres.slides) {
+    for (const slide of pres?.slides || []) {
       repo.upsertSlide(slide);
       if (slide.problem) {
         repo.upsertProblem(slide.problem);
         repo.pushEncounteredProblem(slide.problem, slide, id);
       }
     }
+    restorePendingProblemStatuses();
     ui.updatePresentationList();
   },
 
@@ -331,8 +429,8 @@ export const actions = {
       payload.id,
     );
     const slideId = firstValue(payload.sid, payload.slideId, payload.slide?.id);
-    const problem = repo.problems.get(problemId);
-    const slide = repo.slides.get(slideId);
+    const problem = getProblemById(problemId);
+    const slide = repo.slides.get(slideId) || repo.slides.get(String(slideId));
     if (!problem || !slide) {
       if (notificationOnly) return notifyProblemStart(payload, problem, slide);
       console.log('[雨课堂助手][ERR][onUnlockProblem] 题目或幻灯片不存在');
@@ -344,32 +442,48 @@ export const actions = {
     console.log('[雨课堂助手][DBG][onUnlockProblem] 幻灯片ID:', slideId);
     console.log('[雨课堂助手][DBG][onUnlockProblem] 课件ID:', payload.pres);
 
-    const status = {
-      presentationId: payload.pres,
-      slideId,
-      startTime: payload.dt,
-      endTime: getProblemEndTime(payload.dt, payload.limit),
-      done: !!problem.result,
-      autoAnswerTime: null,
-      answering: false,
-    };
-    repo.problemStatus.set(problemId, status);
+    const pid = problemIdKey(problemId);
+    const recoveryStore = getProblemRecoveryStore();
+    const recovered = recoveryStore?.get(pid);
+    const previous = getProblemStatus(pid);
+    const isFirstUnlock = !previous && !recovered;
+    const status = previous || (recovered ? statusFromRecoveryRecord(recovered) : createStatusForProblem(problem, {
+      autoAnswerQueued: !!ui.config.autoAnswer,
+    }));
 
-    if ((Number.isFinite(status.endTime) && Date.now() > status.endTime) || problem.result) {
+    status.presentationId = payload.pres ?? status.presentationId;
+    status.slideId = slideId ?? status.slideId;
+    status.startTime = payload.dt ?? status.startTime;
+    status.endTime = getProblemEndTime(payload.dt, payload.limit) ?? status.endTime ?? null;
+    status.done = !!problem.result;
+    status.answering = !!status.answering;
+    status.phase = statusPhase(status);
+    status.autoAnswerTime = status.autoAnswerTime ?? null;
+    status.autoAnswerQueued = isFirstUnlock
+      ? !!ui.config.autoAnswer
+      : status.autoAnswerQueued !== false;
+    // 刷新恢复的过期任务可能已经排队等待 /retry；重复解锁事件不能清掉这个标记。
+    status.recoveryForceRetry = status.recoveryForceRetry === true;
+    repo.problemStatus.set(pid, status);
+    persistProblemStatus(pid, status, problem);
+
+    if ((Number.isFinite(status.endTime) && Date.now() >= status.endTime) || problem.result) {
       console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已过期或已作答，跳过');
+      if (problem.result) recoveryStore?.remove(pid);
       return;
     }
 
     const notified = notifyProblemStart(payload, problem, slide);
     if (notificationOnly) return notified;
 
-    if (ui.config.autoAnswer) {
+    if (ui.config.autoAnswer && status.autoAnswerQueued && !status.answering && status.phase !== 'failed' && status.autoAnswerTime === null) {
       const delay = ui.config.autoAnswerDelay + randInt(0, ui.config.autoAnswerRandomDelay);
       status.autoAnswerTime = Date.now() + delay;
       
       console.log(`[雨课堂助手][INFO][onUnlockProblem] 将在 ${Math.floor(delay / 1000)} 秒后自动作答`);
       ui.toast(`将在 ${Math.floor(delay / 1000)} 秒后使用融合模式自动作答`, 3000);
       notifyAutoAnswer('auto-answer-scheduled', problem, `将在约 ${Math.floor(delay / 1000)} 秒后开始自动作答。`);
+      persistProblemStatus(pid, status, problem);
     }
     
     ui.updateActiveProblems();
@@ -419,27 +533,59 @@ export const actions = {
   },
 
   onAnswerProblem(problemId, result) {
-    const p = repo.problems.get(problemId);
+    const p = getProblemById(problemId);
     if (p) {
       p.result = result;
-      const i = repo.encounteredProblems.findIndex(e => e.problemId === problemId);
+      const i = repo.encounteredProblems.findIndex(e => String(e.problemId) === String(problemId));
       if (i !== -1) repo.encounteredProblems[i].result = result;
+      const status = getProblemStatus(problemId);
+      if (status) {
+        status.done = true;
+        status.answering = false;
+        status.phase = 'done';
+        status.autoAnswerTime = null;
+      }
+      getProblemRecoveryStore()?.remove(problemId);
       ui.updateProblemList();
     }
   },
 
-  async handleAutoAnswer(problem) {
-    return handleAutoAnswerInternal(problem);
+  async handleAutoAnswer(problem, options = {}) {
+    const resolved = getProblemById(problem?.problemId) || problem;
+    if (!resolved?.problemId) return { ok: false, reason: 'missing-problem' };
+    const status = options.status || ensureProblemStatus(resolved, {
+      autoAnswerQueued: options.force !== true,
+    });
+    return handleAutoAnswerInternal(resolved, { ...options, status });
+  },
+
+  async forceAIAnswer(problemId, options = {}) {
+    const problem = getProblemById(problemId);
+    if (!problem) return { ok: false, reason: 'missing-problem' };
+    const status = ensureProblemStatus(problem, { autoAnswerQueued: false });
+    if (!status) return { ok: false, reason: 'missing-status' };
+    return handleAutoAnswerInternal(problem, {
+      ...options,
+      status,
+      force: true,
+      source: 'manual',
+    });
   },
 
   tickAutoAnswer() {
     const now = Date.now();
     for (const [pid, status] of repo.problemStatus) {
       if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-        const p = repo.problems.get(pid);
+        const p = getProblemById(pid);
         if (p) {
           status.autoAnswerTime = null;
-          this.handleAutoAnswer(p);
+          persistProblemStatus(pid, status, p);
+          this.handleAutoAnswer(p, {
+            status,
+            force: status.recoveryForceRetry === true,
+            forceRetry: status.recoveryForceRetry === true,
+            source: status.recoveryForceRetry === true ? 'recovery' : 'auto',
+          });
         }
       }
     }
@@ -452,6 +598,24 @@ export const actions = {
       autoGate: false  // 手动提交
     });
     this.onAnswerProblem(problem.problemId, result);
+  },
+
+  async submitParsedAnswer(problem, result, { forceRetry = false } = {}) {
+    const resolved = getProblemById(problem?.problemId) || problem;
+    if (!resolved?.problemId) return { ok: false, reason: 'missing-problem' };
+    const status = ensureProblemStatus(resolved, { autoAnswerQueued: false });
+    if (!status) return { ok: false, reason: 'missing-status' };
+    persistProblemStatus(resolved.problemId, status, resolved);
+    const submission = await submitAnswer(
+      resolved,
+      result,
+      buildAnswerSubmitOptions(status, {
+        lessonId: repo.currentLessonId,
+        forceRetry,
+      }),
+    );
+    this.onAnswerProblem(resolved.problemId, result);
+    return { ok: true, ...submission };
   },
 
   parseManual(problemType, content) {
@@ -492,27 +656,18 @@ export const actions = {
       });
     }
     repo.loadStoredPresentations();
+    restorePendingProblemStatuses();
     this.maybeStartAutoJoin();           
     this.installRouterRearm();            
     void screenWakeLock.setEnabled(ui.config.keepScreenAwake);
   },
   
-    startAutoAnswerLoop() {
-    if (_autoLoopStarted) return;
-    _autoLoopStarted = true;
+  startAutoAnswerLoop() {
+    return startAutoAnswerLoop();
+  },
 
-    setInterval(() => {
-      const now = Date.now();
-      repo.problemStatus.forEach((status, pid) => {
-        if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-          const problem = repo.problems.get(pid);
-          if (problem && !problem.result) {
-            status.autoAnswerTime = null;
-            handleAutoAnswerInternal(problem);
-          }
-        }
-      });
-    }, 500);
+  restorePendingProblemStatuses() {
+    return restorePendingProblemStatuses();
   },
 
   // 自动进入课堂

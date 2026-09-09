@@ -79,6 +79,9 @@ export function mountSettingsPanel() {
   const $autoJoin = root.querySelector('#ykt-input-auto-join');
   const $autoJoinAutoAnswer = root.querySelector('#ykt-input-auto-join-auto-answer');
   const $autoAnalyze = root.querySelector('#ykt-input-ai-auto-analyze');
+  const $autoRecoverUnanswered = root.querySelector('#ykt-input-auto-recover-unanswered');
+  const $autoRecoverExpired = root.querySelector('#ykt-input-auto-recover-expired');
+  const $autoScanUnanswered = root.querySelector('#ykt-input-auto-scan-unanswered');
   const $delay = root.querySelector('#ykt-input-answer-delay');
   const $rand = root.querySelector('#ykt-input-random-delay');
   const $priority = root.querySelector('#ykt-ai-pick-main-first');
@@ -207,6 +210,9 @@ export function mountSettingsPanel() {
     $autoJoinAutoAnswer.checked = !!ui.config.autoAnswerOnAutoJoin;
     $auto.checked = !!ui.config.autoAnswer;
     $autoAnalyze.checked = !!ui.config.aiAutoAnalyze;
+    $autoRecoverUnanswered.checked = !!ui.config.autoRecoverUnanswered;
+    $autoRecoverExpired.checked = !!ui.config.autoRecoverExpired;
+    $autoScanUnanswered.checked = !!ui.config.autoScanUnanswered;
     $iftex.checked = !!ui.config.iftex;
     $delay.value = Math.floor((ui.config.autoAnswerDelay || 3000) / 1000);
     $rand.value = Math.floor((ui.config.autoAnswerRandomDelay || 1500) / 1000);
@@ -263,6 +269,9 @@ export function mountSettingsPanel() {
     ui.config.autoAnswerOnAutoJoin = !!$autoJoinAutoAnswer.checked;
     ui.config.autoAnswer = !!$auto.checked;
     ui.config.aiAutoAnalyze = !!$autoAnalyze.checked;
+    ui.config.autoRecoverUnanswered = !!$autoRecoverUnanswered.checked;
+    ui.config.autoRecoverExpired = !!$autoRecoverExpired.checked;
+    ui.config.autoScanUnanswered = !!$autoScanUnanswered.checked;
     ui.config.autoAnswerDelay = Math.max(1000, (+$delay.value || 0) * 1000);
     ui.config.autoAnswerRandomDelay = Math.max(0, (+$rand.value || 0) * 1000);
     ui.config.iftex = !!$iftex.checked;
@@ -301,6 +310,9 @@ export function mountSettingsPanel() {
 
     ui.config.autoJoinEnabled = false;
     ui.config.autoAnswerOnAutoJoin = true;
+    ui.config.autoRecoverUnanswered = false;
+    ui.config.autoRecoverExpired = false;
+    ui.config.autoScanUnanswered = false;
     syncFormFromConfig();
 
     storage.set('kimiApiKey', '');

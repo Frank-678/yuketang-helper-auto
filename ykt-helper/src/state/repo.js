@@ -5,7 +5,7 @@ export const repo = {
   presentations: new Map(), // id -> presentation
   slides: new Map(),        // slideId -> slide
   problems: new Map(),      // problemId -> problem
-  problemStatus: new Map(), // problemId -> {presentationId, slideId, startTime, endTime, done, autoAnswerTime, answering}
+  problemStatus: new Map(), // problemId -> {presentationId, slideId, startTime, endTime, phase, done, autoAnswerTime, answering, attempts, lastError}
   encounteredProblems: [],  // [{problemId, ...ref}]
 
   currentPresentationId: null,
@@ -58,6 +58,14 @@ export const repo = {
     const stored = storage.getMap(key);
     for (const [id, data] of stored.entries()) {
       this.setPresentation(id, data);
+      const presentation = this.presentations.get(id);
+      for (const slide of presentation?.slides || []) {
+        this.upsertSlide(slide);
+        if (slide?.problem) {
+          this.upsertProblem(slide.problem);
+          this.pushEncounteredProblem(slide.problem, slide, id);
+        }
+      }
     }
   },
 

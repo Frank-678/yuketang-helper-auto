@@ -31,14 +31,12 @@ export function updateActiveProblems() {
   let hasActiveProblems = false;
 
   repo.problemStatus.forEach((status, pid) => {
-    const p = repo.problems.get(pid);
+    const p = repo.problems.get(pid)
+      || repo.problems.get(String(pid))
+      || repo.problems.get(Number.isNaN(Number(pid)) ? pid : Number(pid));
     if (!p || p.result) return;
 
     const remain = getProblemRemainingSeconds(status.endTime, now);
-    if (remain !== null && remain <= 0) {
-      console.log(`[雨课堂助手][INFO][ActiveProblems] 题目 ${pid} 倒计时已结束，移除卡片`);
-      return;
-    }
 
     hasActiveProblems = true;
 
@@ -52,7 +50,8 @@ export function updateActiveProblems() {
 
     const info = document.createElement('div');
     info.className = 'ap-info';
-    info.textContent = remain === null ? '不限时' : `剩余 ${remain}s`;
+    const expired = remain !== null && remain <= 0;
+    info.textContent = remain === null ? '不限时' : (expired ? '已过截止时间，可强制补交' : `剩余 ${remain}s`);
     card.appendChild(info);
 
     const bar = document.createElement('div');
@@ -64,9 +63,28 @@ export function updateActiveProblems() {
     bar.appendChild(go);
 
     const ai = document.createElement('button');
-    ai.textContent = 'AI 解答';
-    ai.onclick = () => window.dispatchEvent(new CustomEvent('ykt:open-ai'));
+    ai.textContent = 'AI 强制作答';
+    ai.onclick = async () => {
+      ai.disabled = true;
+      try {
+        const result = await actions.forceAIAnswer(pid);
+        if (!result?.ok && result?.reason !== 'answering') {
+          console.warn('[雨课堂助手][WARN][ActiveProblems] AI 强制作答失败:', result);
+        }
+      } finally {
+        ai.disabled = false;
+        updateActiveProblems();
+      }
+    };
     bar.appendChild(ai);
+
+    const edit = document.createElement('button');
+    edit.textContent = '编辑/补交';
+    edit.onclick = () => {
+      actions.navigateTo(status.presentationId, status.slideId);
+      window.dispatchEvent(new CustomEvent('ykt:open-problem-list', { detail: { problemId: pid } }));
+    };
+    bar.appendChild(edit);
 
     card.appendChild(bar);
     box.appendChild(card);

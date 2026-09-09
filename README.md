@@ -5,8 +5,8 @@
   <a href="https://github.com/ZaytsevZY/yuketang-helper-auto/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="license"/>
   </a>
-  <a href="./release/ykt-helper-1214.user.js">
-    <img src="https://img.shields.io/badge/version-1.21.4-blue.svg" alt="版本">
+  <a href="./release/ykt-helper-1215.user.js">
+    <img src="https://img.shields.io/badge/version-1.21.5-blue.svg" alt="版本">
   </a>
   <a href="#">
     <img src="https://img.shields.io/badge/platform-Chrome%20%7C%20Edge-green.svg" alt="适配平台">
@@ -26,7 +26,7 @@
     </h3>
 </html>
 
-> 最后更新时间：2026.09.08
+> 最后更新时间：2026.09.09
 
 ## 项目说明
 
@@ -48,7 +48,7 @@
   - 使用edge，你需要打开**拓展-管理拓展-开发者模式**，再开启篡改猴插件中的**允许注入脚本**和**允许访问文件URL权限**
   - 使用chrome，你需要打开 **（右上角三点）-拓展程序-管理拓展程序-开发者模式**，再开启插件面板中的**允许运行用户脚本**和**允许访问文件网址**
 
-- 可直接[安装此 fork 的 1.21.4 发布脚本](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper-1214.user.js)。
+- 可直接[安装此 fork 的 1.21.5 发布脚本](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper-1215.user.js)。
 
 - 也可以[安装 GreasyFork 的稳定版本](https://update.greasyfork.org/scripts/531469/AI%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B.user.js)；它通常不是最新版本。
 
@@ -60,7 +60,7 @@
 
 - 或手动创建新脚本，将 `release/ykt-helper-<版本号>.user.js` 的内容复制到篡改猴的新建脚本中。
 
-- 当前构建版本为 `1.21.4`，支持：
+- 当前构建版本为 `1.21.5`，支持：
 
   - `148.0.7778.98-chrome`及以下的chrome
 
@@ -145,6 +145,10 @@
   - 如果未打开问题列表，会默认解答最新的题目（可自动进行）（你可以在 :gear: 中调整）
   - 如果已打开问题列表并选择了某个问题，会解答选中的问题
   - 目前暂时不支持从左侧边栏中选择要回答的问题
+
+- 1.21.5 增加了作答中断恢复：可在设置中分别开启“刷新后恢复已排队/被中断的 AI 作答”“刷新后自动强制补交已过期题目”和“自动扫描当前课程中未作答题目”。三个开关默认关闭，过期补交必须单独确认。
+- 当前题目页、活动题目卡片、题目列表和 AI 面板都提供“AI 强制作答”。AI 分析完成后可在结构化答案框中修改，再提交或强制补交。
+- 同一题同时只允许一个 AI 请求；刷新或重复收到解锁事件不会重复提交。请求失败会保留重试入口。
 - 自动作答成功后，建议不定时手动刷新一次界面，纯挂机后果自负
 - 自动作答可能有误，可能作答失败。本插件不对可能造成的成绩影响负责
 - 在没有配置Apikey而且全程挂机的情况下，本插件将随机作答
@@ -212,6 +216,8 @@
 ---
 
 - 1.21.4: 修复不限时题目因空 `limit` 被判定为立即过期，恢复不限时题目的自动作答并在活动题目列表中显示“不限时”；新增可选的重复弹幕自动跟发（7 条窗口、3 条阈值、60 秒分轮、每轮最多 2 条）
+
+- 1.21.5: 新增按课程隔离的自动作答队列持久化；刷新后可恢复已排队或被中断的题目；新增题目页、活动题目、题目列表和 AI 面板的 AI 强制作答及编辑答案提交；新增自动恢复、过期强制补交和未作答扫描三个独立开关，默认关闭；新增恢复状态、AI 执行器和答案编辑解析测试
 
 - 1.21.3: 汇总 Profile Temperature、入口页与桌面专用 `/m/v2` 路由守卫、细分课堂提醒、发布事件去重与误报修复、课堂保持亮屏
 

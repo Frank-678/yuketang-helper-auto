@@ -114,6 +114,31 @@
             <span class="checkmark"></span>
             启用自动作答
           </label>
+          <small>题目首次出现时按延迟设置自动分析并提交。</small>
+        </div>
+        <div class="setting-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="ykt-input-auto-recover-unanswered">
+            <span class="checkmark"></span>
+            刷新后恢复已排队/被中断的 AI 作答
+          </label>
+          <small>只恢复刷新前已经记录为“待作答”或“作答中”的题目；不会默认扫描历史课件。</small>
+        </div>
+        <div class="setting-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="ykt-input-auto-recover-expired">
+            <span class="checkmark"></span>
+            刷新后自动强制补交已过期题目
+          </label>
+          <small>需要同时开启上项；已过截止时间时会调用补交接口，风险较高，默认关闭。</small>
+        </div>
+        <div class="setting-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="ykt-input-auto-scan-unanswered">
+            <span class="checkmark"></span>
+            自动扫描当前课程中未作答题目
+          </label>
+          <small>仅当前课程已缓存题目；会主动让 AI 尝试未作答题，可能包含旧题，默认关闭。</small>
         </div>
         <div class="setting-item">
           <label class="checkbox-label">

@@ -1,6 +1,6 @@
 # ykt-helper 开发文档
 
-> 当前发布版本为 1.21.4，正式用户脚本位于 [`../release/ykt-helper-1214.user.js`](../release/ykt-helper-1214.user.js)。`flat/` 是旧版扁平化实现，不参与当前发布。
+> 当前发布版本为 1.21.5，正式用户脚本位于 [`../release/ykt-helper-1215.user.js`](../release/ykt-helper-1215.user.js)。`flat/` 是旧版扁平化实现，不参与当前发布。
 
 ## 项目构建
 
@@ -17,11 +17,13 @@ npm run dev          # 开发模式（监听文件变化）
 ```
 
 ### 使用方式
-构建后的当前产物是 `dist/ykt-helper-1214.user.js`；发布前将它与根目录的 `../release/ykt-helper-1214.user.js` 保持完全一致，再导入 Tampermonkey。旧的 1.21.3 发布包保留作历史版本。
+构建后的当前产物是 `dist/ykt-helper-1215.user.js`；发布前将它与根目录的 `../release/ykt-helper-1215.user.js` 保持完全一致，再导入 Tampermonkey。旧的 1.21.4 及更早发布包保留作历史版本。
 
 本版本修复不限时题目的 `limit` 为空时被错误判定为已过期的问题；空值、`0` 和非法时限均按“不限时”处理，正数时限仍按秒计算。
 
 课堂互动还提供可选的“重复弹幕自动跟发”：最近 7 条弹幕中同一文本出现 3 次时跟发相同文本；相邻弹幕间隔达到 60 秒重新分轮，每轮最多 2 条，同一文本每轮只跟发一次，默认关闭。
+
+1.21.5 新增自动作答恢复：自动作答队列会按课程保存在本地，刷新后可恢复刷新前已经排队或正在 AI 处理的题目。恢复和扫描均为独立开关且默认关闭；已过截止时间的自动补交还需要单独开启。题目页、活动题目卡片、题目列表和 AI 面板均提供“AI 强制作答”以及“编辑/补交”入口。
 
 ### 本地调试
 `debug/` 目录提供了本地调试环境，无需 Tampermonkey 即可运行 UI。
@@ -67,6 +69,9 @@ src/
 │   └── xhr-interceptor.js     # XHR 拦截
 ├── state/                     # 状态管理
 │   ├── actions.js             # 动作处理器（融合模式自动答题）
+│   ├── answer-editor.js       # 编辑答案的 JSON/文本解析与提交参数
+│   ├── auto-answer-recovery.js # 按课程持久化待作答状态与恢复策略
+│   ├── auto-answer-runner.js  # 单题 AI 作答、补交与失败状态机
 │   └── repo.js                # 数据仓库
 ├── tsm/                       # 雨课堂业务逻辑
 │   ├── ai-format.js           # AI 格式化（智能提示和解析）
@@ -123,6 +128,17 @@ src/
 4. **智能解析**：根据题型精确解析AI回答格式
 5. **自动提交**：验证答案格式后自动提交
 
+### 刷新恢复与手动强制作答
+
+- 在“自动作答设置”中可分别打开：
+  - **刷新后恢复已排队/被中断的 AI 作答**：只恢复本地记录中已经出现过的题目；
+  - **刷新后自动强制补交已过期题目**：需要同时打开上一项，默认关闭；
+  - **自动扫描当前课程中未作答题目**：会扫描已缓存课件中的旧题，默认关闭。
+- 在题目页、活动题目卡片、题目列表或 AI 面板点击 **AI 强制作答**，会立即开始 AI 请求，不等待自动作答延迟；题目过期时会先确认，再调用 `/api/v3/lesson/problem/retry`。
+- AI 分析完成后，编辑区会显示结构化答案。可以修改 JSON 或使用题型简写，再点击 **提交编辑后的答案**。
+- 同一题同时只能有一个 AI 请求；刷新、重复解锁或重复点击不会创建重复请求。AI 请求失败会保留“失败”状态，等待手动重试。
+- 本地恢复记录按课程隔离，并自动清理超过 24 小时或超出 100 条上限的记录；脚本不会默认把历史课件题目自动提交。
+
 ## 核心模块接口
 
 ### state/repo.js - 数据仓库
@@ -149,9 +165,34 @@ export const actions = {
   onUnlockProblem(data),          // 题目解锁（融合模式分析）
   onDanmu(data),                  // 收到课堂弹幕并按设置决定是否跟发
   handleAutoAnswer(problem),       // 自动答题（融合模式）
+  forceAIAnswer(problemId),        // 手动强制 AI 作答并提交
+  submitParsedAnswer(problem, result), // 提交编辑后的结构化答案
+  restorePendingProblemStatuses(), // 恢复本课程持久化的待作答状态
   navigateTo(presId, slideId),    // 导航到指定页面
   launchLessonHelper()            // 启动课堂助手
 }
+```
+
+### state/auto-answer-recovery.js - 恢复策略
+
+```javascript
+createProblemRecoveryStore({ storage, lessonId })
+// upsert/get/list/update/remove/clear：按课程读写待作答记录
+
+shouldRecoverProblem(record, { enabled, recoverExpired, now })
+// 返回 { recover, forceRetry, reason }
+```
+
+### state/auto-answer-runner.js - 单题作答执行器
+
+```javascript
+createAutoAnswerRunner(dependencies).run(problem, status, {
+  force,          // 手动/恢复时绕过自动等待
+  forceRetry,     // 过期后走补交接口
+  source,
+  lessonId,
+})
+// 返回 { ok, answer, aiAnswer, route }，失败时保留 status.phase='failed'
 ```
 
 ### ai/openai.js - 当前 AI 服务
@@ -217,11 +258,11 @@ export const ui = {
 
 ## 面板组件
 
-- **settings**: 配置 Kimi API Key、自动答题参数
+- **settings**: 配置 Kimi API Key、自动答题参数、刷新恢复与扫描开关
 - **ai**: AI 融合分析交互面板（文本+图像）
 - **presentation**: 课件浏览与下载
 - **problem-list**: 题目历史记录
-- **active-problems**: 当前活跃题目
+- **active-problems**: 当前活跃题目、AI 强制作答与编辑/补交入口
 - **tutorial**: 使用教程
 - **auto-answer-popup**: 自动答题结果弹窗
 

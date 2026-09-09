@@ -226,6 +226,11 @@
 #ykt-presentation-panel .problem-box-close:hover{ color: #111; border-color: var(--ykt-accent); }
 #ykt-presentation-panel .problem-options{ display: grid; grid-template-columns: 1fr; gap: 4px; }
 #ykt-presentation-panel .problem-option{ padding: 6px 8px; border: 1px solid var(--ykt-border); border-radius: 6px; background: #fafafa; }
+#ykt-presentation-panel .problem-actions{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#ykt-presentation-panel .problem-actions button{
+  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;
+}
+#ykt-presentation-panel .problem-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }
 
 /* ===== 题目列表面板 (#ykt-problem-list-panel) ===== */
 #ykt-problem-list{ display: flex; flex-direction: column; gap: 10px; }
