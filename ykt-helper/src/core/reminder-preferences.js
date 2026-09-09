@@ -2,6 +2,8 @@
 
 const EVENT_PREFERENCE_KEYS = {
   'problem-start': 'notifyProblemStarts',
+  'danmu-round-start': 'notifyDanmuRoundStarts',
+  'danmu-follow-trigger': 'notifyDanmuFollowTriggers',
   'assessment-publish': 'notifyAssessmentPublishes',
   'courseware-publish': 'notifyCoursewarePublishes',
   'other-publish': 'notifyOtherPublishes',
@@ -18,6 +20,8 @@ export const REMINDER_DEFAULTS = {
 
   // 事件开关
   notifyProblemStarts: true,
+  notifyDanmuRoundStarts: true,
+  notifyDanmuFollowTriggers: true,
   notifyAssessmentPublishes: true,
   notifyCoursewarePublishes: true,
   notifyOtherPublishes: true,
@@ -39,6 +43,18 @@ export const REMINDER_EVENT_OPTIONS = [
     key: 'notifyProblemStarts',
     label: '新题 / 答题开始',
     detail: '老师开启一道可作答的习题时提醒。',
+  },
+  {
+    kind: 'danmu-round-start',
+    key: 'notifyDanmuRoundStarts',
+    label: '新一轮弹幕开始',
+    detail: '与上一条弹幕间隔达到 60 秒后，收到新一轮第一条弹幕时提醒。',
+  },
+  {
+    kind: 'danmu-follow-trigger',
+    key: 'notifyDanmuFollowTriggers',
+    label: '重复弹幕达到跟发条件',
+    detail: '本轮同一文本累计出现 3 次、脚本准备自动跟发时提醒。',
   },
   {
     kind: 'assessment-publish',

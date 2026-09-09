@@ -89,6 +89,8 @@ export function mountSettingsPanel() {
   const $notifyVol = root.querySelector('#ykt-input-notify-volume');
   const $notifyAll = root.querySelector('#ykt-input-notify-all');
   const $notifyProblemStart = root.querySelector('#ykt-input-notify-problem-start');
+  const $notifyDanmuRoundStart = root.querySelector('#ykt-input-notify-danmu-round-start');
+  const $notifyDanmuFollowTrigger = root.querySelector('#ykt-input-notify-danmu-follow-trigger');
   const $notifyAssessment = root.querySelector('#ykt-input-notify-assessment-publish');
   const $notifyCourseware = root.querySelector('#ykt-input-notify-courseware-publish');
   const $notifyOther = root.querySelector('#ykt-input-notify-other-publish');
@@ -113,6 +115,8 @@ export function mountSettingsPanel() {
   const reminderFields = {
     notifyProblems: $notifyAll,
     notifyProblemStarts: $notifyProblemStart,
+    notifyDanmuRoundStarts: $notifyDanmuRoundStart,
+    notifyDanmuFollowTriggers: $notifyDanmuFollowTrigger,
     notifyAssessmentPublishes: $notifyAssessment,
     notifyCoursewarePublishes: $notifyCourseware,
     notifyOtherPublishes: $notifyOther,

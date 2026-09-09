@@ -15,6 +15,82 @@ function tracker(options = {}) {
   ));
 }
 
+test('reports a new round only after an adjacent gap of at least one minute', async () => {
+  const { createDanmuRoundTracker } = await loadDanmuFollow();
+  const rounds = createDanmuRoundTracker({ roundGapMs: 60_000 });
+
+  assert.deepEqual(rounds.observe(0), {
+    roundStarted: false,
+    roundNumber: 1,
+    at: 0,
+  });
+  assert.deepEqual(rounds.observe(59_999), {
+    roundStarted: false,
+    roundNumber: 1,
+    at: 59_999,
+  });
+  assert.deepEqual(rounds.observe(119_998), {
+    roundStarted: false,
+    roundNumber: 1,
+    at: 119_998,
+  });
+  assert.deepEqual(rounds.observe(179_998), {
+    roundStarted: true,
+    roundNumber: 2,
+    at: 179_998,
+  });
+  assert.equal(rounds.observe(239_997).roundStarted, false);
+});
+
+test('emits a round-start callback even when automatic following is disabled', async () => {
+  const { createDanmuFollowController } = await loadDanmuFollow();
+  const roundStarts = [];
+  let now = 0;
+  const controller = createDanmuFollowController({
+    enabled: () => false,
+    now: () => now,
+    onRoundStart: event => roundStarts.push(event),
+  });
+
+  controller.handle({ op: 'newdanmu', danmu: '第一轮', userid: 1 });
+  now = 60_000;
+  controller.handle({ op: 'newdanmu', danmu: '第二轮', userid: 2 });
+
+  assert.equal(roundStarts.length, 1);
+  assert.deepEqual(roundStarts[0], {
+    roundStarted: true,
+    roundNumber: 2,
+    at: 60_000,
+    text: '第二轮',
+  });
+});
+
+test('emits a follow-trigger callback when the third identical barrage is reached', async () => {
+  const { createDanmuFollowController } = await loadDanmuFollow();
+  const followTriggers = [];
+  let now = 0;
+  const controller = createDanmuFollowController({
+    now: () => now,
+    onFollowTrigger: event => followTriggers.push(event),
+    send: text => ({ sent: true, text }),
+  });
+
+  controller.handle({ op: 'newdanmu', danmu: '重复内容', userid: 1 });
+  now = 1;
+  controller.handle({ op: 'newdanmu', danmu: '重复内容', userid: 2 });
+  now = 2;
+  controller.handle({ op: 'newdanmu', danmu: '重复内容', userid: 3 });
+
+  assert.deepEqual(followTriggers, [{
+    triggered: true,
+    text: '重复内容',
+    count: 3,
+    sentCount: 1,
+    roundNumber: 1,
+    at: 2,
+  }]);
+});
+
 test('triggers when a text appears three times in the current seven-message window', async () => {
   const follow = await tracker();
 

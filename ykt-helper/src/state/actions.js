@@ -38,10 +38,22 @@ const problemStartReminder = createEventReminder({
 
 const danmuFollowControllers = new Map();
 
-function createDanmuFollowControllerForLesson() {
+function createDanmuFollowControllerForLesson(lessonId) {
   return createDanmuFollowController({
     enabled: () => ui.config.autoFollowDanmu === true,
     getCurrentUserId: getCurrentUserIdSafe,
+    onRoundStart: event => ui.notifyClassroomEvent({
+      kind: 'danmu-round-start',
+      dedupeKey: `danmu-round-start:${lessonId}:${event.roundNumber}`,
+      title: '新一轮弹幕开始',
+      detail: `检测到第 ${event.roundNumber} 轮弹幕。首条内容：${event.text}`,
+    }),
+    onFollowTrigger: event => ui.notifyClassroomEvent({
+      kind: 'danmu-follow-trigger',
+      dedupeKey: `danmu-follow-trigger:${lessonId}:${event.roundNumber}:${event.text}`,
+      title: '重复弹幕达到跟发条件',
+      detail: `本轮“${event.text}”已出现 ${event.count} 次，脚本即将自动跟发。`,
+    }),
     send: text => sendDanmuText(text, {
       root: (gm.uw || window).document || document,
     }),
@@ -52,7 +64,7 @@ function getDanmuFollowController(lessonId) {
   const key = String(lessonId || '__current__');
   let controller = danmuFollowControllers.get(key);
   if (!controller) {
-    controller = createDanmuFollowControllerForLesson();
+    controller = createDanmuFollowControllerForLesson(key);
     danmuFollowControllers.set(key, controller);
   }
   return controller;
@@ -342,7 +354,7 @@ export function hasActiveAIProfile(aiCfg) {
 
 const autoAnswerRunner = createAutoAnswerRunner({
   typeMap: PROBLEM_TYPE_MAP,
-  hasActiveProfile,
+  hasActiveProfile: hasActiveAIProfile,
   getAIConfig: () => ui.config.ai,
   makeDefaultAnswer,
   captureSlideImage,

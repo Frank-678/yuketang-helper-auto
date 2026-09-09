@@ -264,7 +264,7 @@
   cursor: pointer; padding: 0; font-size: 14px; line-height: 16px;
 }
 #ykt-active-problems .ap-close:hover{ color: #111; border-color: var(--ykt-accent); }
-#ykt-active-problems .ap-title{ font-weight: 600; margin-bottom: 4px; }
+#ykt-active-problems .ap-title{ font-weight: 600; margin-bottom: 4px; padding-right: 28px; }
 #ykt-active-problems .ap-info{ color: #666; font-size: 12px; margin-bottom: 8px; }
 #ykt-active-problems .ap-actions{ display: flex; gap: 8px; }
 #ykt-active-problems .ap-actions button{

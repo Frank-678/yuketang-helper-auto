@@ -2,9 +2,11 @@ import tpl from './active-problems.html';
 import { repo } from '../../state/repo.js';
 import { actions } from '../../state/actions.js';
 import { getProblemRemainingSeconds } from '../../state/problem-timing.js';
+import { createProblemDismissalState } from '../../core/active-problem-dismissal.js';
 
 let mounted = false;
 let root;
+const dismissalState = createProblemDismissalState();
 
 function $(sel) {
   return document.querySelector(sel);
@@ -28,7 +30,7 @@ export function updateActiveProblems() {
   box.innerHTML = '';
 
   const now = Date.now();
-  let hasActiveProblems = false;
+  const activeProblemIds = new Set();
 
   repo.problemStatus.forEach((status, pid) => {
     const p = repo.problems.get(pid)
@@ -38,10 +40,26 @@ export function updateActiveProblems() {
 
     const remain = getProblemRemainingSeconds(status.endTime, now);
 
-    hasActiveProblems = true;
+    const pidStr = String(pid);
+    activeProblemIds.add(pidStr);
+    if (dismissalState.isDismissed(pidStr)) return;
 
     const card = document.createElement('div');
     card.className = 'active-problem-card';
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'ap-close';
+    close.title = '关闭题目提示';
+    close.setAttribute('aria-label', '关闭题目提示');
+    close.textContent = '×';
+    close.onclick = event => {
+      event.stopPropagation();
+      dismissalState.dismiss(pidStr);
+      card.remove();
+      if (box.children.length === 0) root.style.display = 'none';
+    };
+    card.appendChild(close);
 
     const title = document.createElement('div');
     title.className = 'ap-title';
@@ -90,7 +108,8 @@ export function updateActiveProblems() {
     box.appendChild(card);
   });
 
-  if (!hasActiveProblems) {
+  dismissalState.prune(activeProblemIds);
+  if (box.children.length === 0) {
     root.style.display = 'none';
   } else {
     root.style.display = '';

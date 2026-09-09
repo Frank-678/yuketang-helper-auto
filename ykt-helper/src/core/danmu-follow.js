@@ -44,6 +44,45 @@ export function extractDanmuMessage(message) {
 }
 
 /**
+ * Tracks classroom barrage round boundaries without applying follow rules.
+ * The first observed message starts round 1 silently; a later message starts
+ * a new round when the adjacent gap reaches the configured roundGapMs.
+ */
+export function createDanmuRoundTracker(options = {}) {
+  const roundGapMs = finitePositive(options.roundGapMs, DEFAULTS.roundGapMs);
+  let lastAt = null;
+  let roundNumber = 0;
+
+  function reset() {
+    lastAt = null;
+    roundNumber = 0;
+  }
+
+  function observe(at = Date.now()) {
+    const timestamp = Number(at);
+    const now = Number.isFinite(timestamp) ? timestamp : Date.now();
+    const roundStarted = lastAt !== null && now - lastAt >= roundGapMs;
+
+    if (lastAt === null || roundStarted) roundNumber += 1;
+    lastAt = now;
+
+    return {
+      roundStarted,
+      roundNumber,
+      at: now,
+    };
+  }
+
+  return {
+    observe,
+    reset,
+    getSnapshot() {
+      return { lastAt, roundNumber };
+    },
+  };
+}
+
+/**
  * Tracks one classroom's barrage stream.
  * A round continues while each adjacent non-empty message is less than the
  * configured gap apart.  The detector only remembers the latest windowSize
@@ -123,11 +162,14 @@ export function createDanmuFollowTracker(options = {}) {
  */
 export function createDanmuFollowController(options = {}) {
   const tracker = options.tracker || createDanmuFollowTracker(options);
+  const roundTracker = options.roundTracker || createDanmuRoundTracker(options);
   const enabled = options.enabled === undefined ? () => true : options.enabled;
   const send = options.send || (text => sendDanmuText(text));
   const getCurrentUserId = options.getCurrentUserId || (() => null);
   const getNow = options.now || (() => Date.now());
   const ownEchoTtlMs = finitePositive(options.ownEchoTtlMs, 10_000);
+  const onRoundStart = typeof options.onRoundStart === 'function' ? options.onRoundStart : null;
+  const onFollowTrigger = typeof options.onFollowTrigger === 'function' ? options.onFollowTrigger : null;
   const pendingOwn = new Map();
 
   function isEnabled() {
@@ -173,12 +215,6 @@ export function createDanmuFollowController(options = {}) {
       return { handled: true, triggered: false, text: parsed.text, reason: 'notification-only' };
     }
 
-    if (!isEnabled()) {
-      tracker.reset();
-      pendingOwn.clear();
-      return { handled: true, triggered: false, text: parsed.text, reason: 'disabled' };
-    }
-
     const rawNow = Number(getNow());
     const now = Number.isFinite(rawNow) ? rawNow : Date.now();
     const ownId = currentUserId();
@@ -189,8 +225,40 @@ export function createDanmuFollowController(options = {}) {
       return { handled: true, triggered: false, text: parsed.text, reason: 'own-echo' };
     }
 
+    const round = roundTracker.observe(now);
+    if (round.roundStarted) {
+      try {
+        onRoundStart?.({ ...round, text: parsed.text });
+      } catch {}
+    }
+
+    if (!isEnabled()) {
+      tracker.reset();
+      pendingOwn.clear();
+      return {
+        handled: true,
+        triggered: false,
+        text: parsed.text,
+        roundNumber: round.roundNumber,
+        at: round.at,
+        roundStarted: round.roundStarted,
+        reason: 'disabled',
+      };
+    }
+
     const observation = tracker.observe(parsed.text, now);
-    if (!observation.triggered) return { handled: true, ...observation };
+    const enriched = {
+      ...observation,
+      roundNumber: round.roundNumber,
+      at: round.at,
+    };
+    if (!observation.triggered) {
+      return { handled: true, ...enriched };
+    }
+
+    try {
+      onFollowTrigger?.(enriched);
+    } catch {}
 
     let sendResult;
     try {
@@ -200,13 +268,14 @@ export function createDanmuFollowController(options = {}) {
     }
     if (sendResult === true || sendResult?.sent === true) rememberOwn(parsed.text, now);
 
-    return { handled: true, ...observation, sendResult };
+    return { handled: true, ...enriched, sendResult };
   }
 
   return {
     handle,
     reset() {
       tracker.reset();
+      roundTracker.reset();
       pendingOwn.clear();
     },
     getSnapshot() {
