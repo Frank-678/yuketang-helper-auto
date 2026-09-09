@@ -24,7 +24,7 @@ test('sends mobile realtime problem events through the notification-only path', 
   assert.equal(result.notificationOnly, true);
   assert.deepEqual(calls, [{
     problem: { op: 'unlockproblem', problem: 'problem-101', sid: 'slide-5', prob: 'problem-101' },
-    options: { notificationOnly: true },
+    options: { notificationOnly: true, source: 'live' },
   }]);
 });
 
@@ -43,7 +43,7 @@ test('keeps desktop realtime events on the normal action path', async () => {
 
   assert.deepEqual(calls, [{
     timeline: [{ type: 'problem' }],
-    options: { notificationOnly: false },
+    options: { notificationOnly: false, source: 'timeline' },
   }]);
 });
 
@@ -67,6 +67,6 @@ test('routes newdanmu frames to the barrage handler', async () => {
   assert.equal(result.realtime.kind, 'danmu');
   assert.deepEqual(calls, [{
     message: { op: 'newdanmu', danmu: '跟上这条', userid: 42 },
-    options: { notificationOnly: false, lessonId: 'lesson-9' },
+    options: { notificationOnly: false, source: 'live', lessonId: 'lesson-9' },
   }]);
 });

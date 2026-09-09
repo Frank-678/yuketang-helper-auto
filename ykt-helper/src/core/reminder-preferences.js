@@ -53,8 +53,8 @@ export const REMINDER_EVENT_OPTIONS = [
   {
     kind: 'danmu-follow-trigger',
     key: 'notifyDanmuFollowTriggers',
-    label: '重复弹幕达到跟发条件',
-    detail: '本轮同一文本累计出现 3 次、脚本准备自动跟发时提醒。',
+    label: '7 条弹幕达到跟发条件',
+    detail: '连续 7 条弹幕在 30 秒内达到条件时提醒；发送数量最多的文本胜出，并列时取最新一条。',
   },
   {
     kind: 'assessment-publish',

@@ -2,7 +2,7 @@ import { sendDanmuText } from './danmu-sender.js';
 
 const DEFAULTS = {
   windowSize: 7,
-  threshold: 3,
+  burstWindowMs: 30_000,
   roundGapMs: 60_000,
   maxSendsPerRound: 2,
 };
@@ -85,12 +85,14 @@ export function createDanmuRoundTracker(options = {}) {
 /**
  * Tracks one classroom's barrage stream.
  * A round continues while each adjacent non-empty message is less than the
- * configured gap apart.  The detector only remembers the latest windowSize
- * messages and emits at most one trigger per text and maxSendsPerRound total.
+ * configured gap apart.  Once windowSize consecutive messages are available,
+ * they must fit inside burstWindowMs; the most frequent exact text wins, with
+ * the newest text breaking ties.  Each completed burst is consumed so one
+ * message cannot trigger twice.
  */
 export function createDanmuFollowTracker(options = {}) {
   const windowSize = Math.max(1, Math.floor(finitePositive(options.windowSize, DEFAULTS.windowSize)));
-  const threshold = Math.max(1, Math.floor(finitePositive(options.threshold, DEFAULTS.threshold)));
+  const burstWindowMs = finitePositive(options.burstWindowMs, DEFAULTS.burstWindowMs);
   const roundGapMs = finitePositive(options.roundGapMs, DEFAULTS.roundGapMs);
   const maxSendsPerRound = Math.max(0, Math.floor(Number.isFinite(Number(options.maxSendsPerRound))
     ? Number(options.maxSendsPerRound)
@@ -132,14 +134,38 @@ export function createDanmuFollowTracker(options = {}) {
     if (messages.length > windowSize) messages = messages.slice(-windowSize);
     lastAt = now;
 
-    const count = messages.reduce((total, item) => total + (item.text === text ? 1 : 0), 0);
-    if (count < threshold) return result(false, text, count, 'threshold');
-    if (followedTexts.has(text)) return result(false, text, count, 'already-followed');
-    if (sentCount >= maxSendsPerRound) return result(false, text, count, 'round-limit');
+    const currentCount = messages.reduce((total, item) => total + (item.text === text ? 1 : 0), 0);
+    if (messages.length < windowSize) return result(false, text, currentCount, 'burst-size');
 
-    followedTexts.add(text);
+    const burstAge = now - messages[0].at;
+    if (burstAge > burstWindowMs) return result(false, text, currentCount, 'burst-window');
+
+    const counts = new Map();
+    for (const item of messages) counts.set(item.text, (counts.get(item.text) || 0) + 1);
+
+    let winnerText = messages[messages.length - 1].text;
+    let winnerCount = counts.get(winnerText) || 0;
+    let winnerIndex = messages.length - 1;
+    messages.forEach((item, index) => {
+      const count = counts.get(item.text) || 0;
+      if (count > winnerCount || (count === winnerCount && index >= winnerIndex)) {
+        winnerText = item.text;
+        winnerCount = count;
+        winnerIndex = index;
+      }
+    });
+
+    if (followedTexts.has(winnerText)) return result(false, winnerText, winnerCount, 'already-followed');
+    if (sentCount >= maxSendsPerRound) return result(false, winnerText, winnerCount, 'round-limit');
+
+    followedTexts.add(winnerText);
     sentCount += 1;
-    return result(true, text, count);
+    messages = [];
+    return {
+      ...result(true, winnerText, winnerCount),
+      batchSize: windowSize,
+      burstWindowMs,
+    };
   }
 
   return {
@@ -262,11 +288,11 @@ export function createDanmuFollowController(options = {}) {
 
     let sendResult;
     try {
-      sendResult = send(parsed.text);
+      sendResult = send(observation.text);
     } catch (error) {
-      sendResult = { sent: false, text: parsed.text, reason: 'send-error', error };
+      sendResult = { sent: false, text: observation.text, reason: 'send-error', error };
     }
-    if (sendResult === true || sendResult?.sent === true) rememberOwn(parsed.text, now);
+    if (sendResult === true || sendResult?.sent === true) rememberOwn(observation.text, now);
 
     return { handled: true, ...enriched, sendResult };
   }

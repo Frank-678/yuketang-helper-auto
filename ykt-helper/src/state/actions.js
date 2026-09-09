@@ -20,6 +20,7 @@ import { createAutoAnswerRunner } from './auto-answer-runner.js';
 import { buildAnswerSubmitOptions } from './answer-editor.js';
 import { createDanmuFollowController } from '../core/danmu-follow.js';
 import { sendDanmuText } from '../core/danmu-sender.js';
+import { isLiveProblemSource } from '../core/problem-event-source.js';
 
 let _autoLoopStarted = false;
 let _autoJoinStarted = false;
@@ -51,8 +52,8 @@ function createDanmuFollowControllerForLesson(lessonId) {
     onFollowTrigger: event => ui.notifyClassroomEvent({
       kind: 'danmu-follow-trigger',
       dedupeKey: `danmu-follow-trigger:${lessonId}:${event.roundNumber}:${event.text}`,
-      title: '重复弹幕达到跟发条件',
-      detail: `本轮“${event.text}”已出现 ${event.count} 次，脚本即将自动跟发。`,
+      title: '弹幕达到自动跟发条件',
+      detail: `最近 ${event.batchSize} 条弹幕中，“${event.text}”出现 ${event.count} 次，脚本即将自动跟发。`,
     }),
     send: text => sendDanmuText(text, {
       root: (gm.uw || window).document || document,
@@ -412,7 +413,9 @@ export function startAutoAnswerLoop() {
 export const actions = {
   onFetchTimeline(timeline, options = {}) {
     for (const piece of Array.isArray(timeline) ? timeline : []) {
-      if (piece?.type === 'problem') this.onUnlockProblem(piece, options);
+      if (piece?.type === 'problem') {
+        this.onUnlockProblem(piece, { ...options, source: 'timeline' });
+      }
     }
   },
 
@@ -430,7 +433,8 @@ export const actions = {
     ui.updatePresentationList();
   },
 
-  onUnlockProblem(data, { notificationOnly = false } = {}) {
+  onUnlockProblem(data, { notificationOnly = false, source = 'live' } = {}) {
+    const isLiveUnlock = isLiveProblemSource(source);
     const payload = data && typeof data === 'object' ? data : {};
     const problemId = firstValue(
       payload.prob,
@@ -444,12 +448,12 @@ export const actions = {
     const problem = getProblemById(problemId);
     const slide = repo.slides.get(slideId) || repo.slides.get(String(slideId));
     if (!problem || !slide) {
-      if (notificationOnly) return notifyProblemStart(payload, problem, slide);
+      if (notificationOnly && isLiveUnlock) return notifyProblemStart(payload, problem, slide);
       console.log('[雨课堂助手][ERR][onUnlockProblem] 题目或幻灯片不存在');
       return false;
     }
 
-    console.log('[雨课堂助手][DBG][onUnlockProblem] 题目解锁');
+    console.log(`[雨课堂助手][DBG][onUnlockProblem] ${isLiveUnlock ? '题目解锁' : '历史时间线题目状态恢复'}`);
     console.log('[雨课堂助手][DBG][onUnlockProblem] 题目ID:', problemId);
     console.log('[雨课堂助手][DBG][onUnlockProblem] 幻灯片ID:', slideId);
     console.log('[雨课堂助手][DBG][onUnlockProblem] 课件ID:', payload.pres);
@@ -460,7 +464,7 @@ export const actions = {
     const previous = getProblemStatus(pid);
     const isFirstUnlock = !previous && !recovered;
     const status = previous || (recovered ? statusFromRecoveryRecord(recovered) : createStatusForProblem(problem, {
-      autoAnswerQueued: !!ui.config.autoAnswer,
+      autoAnswerQueued: isLiveUnlock && !!ui.config.autoAnswer,
     }));
 
     status.presentationId = payload.pres ?? status.presentationId;
@@ -472,17 +476,25 @@ export const actions = {
     status.phase = statusPhase(status);
     status.autoAnswerTime = status.autoAnswerTime ?? null;
     status.autoAnswerQueued = isFirstUnlock
-      ? !!ui.config.autoAnswer
+      ? isLiveUnlock && !!ui.config.autoAnswer
       : status.autoAnswerQueued !== false;
     // 刷新恢复的过期任务可能已经排队等待 /retry；重复解锁事件不能清掉这个标记。
     status.recoveryForceRetry = status.recoveryForceRetry === true;
     repo.problemStatus.set(pid, status);
-    persistProblemStatus(pid, status, problem);
+    if (isLiveUnlock) persistProblemStatus(pid, status, problem);
 
     if ((Number.isFinite(status.endTime) && Date.now() >= status.endTime) || problem.result) {
       console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已过期或已作答，跳过');
       if (problem.result) recoveryStore?.remove(pid);
       return;
+    }
+
+    // fetchtimeline replays historical slides when navigating/reloading.  It
+    // may hydrate status for the active-problem UI, but it must not look like a
+    // newly published question or queue an automatic answer.
+    if (!isLiveUnlock) {
+      ui.updateActiveProblems();
+      return false;
     }
 
     const notified = notifyProblemStart(payload, problem, slide);

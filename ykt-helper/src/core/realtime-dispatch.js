@@ -13,7 +13,10 @@ export function dispatchRealtimeMessage(message, {
 } = {}) {
   const realtime = getRealtimeEvent(message);
   const notificationOnly = getRuntimeMode() === 'mobile-reminder';
-  const options = { notificationOnly };
+  const options = {
+    notificationOnly,
+    source: realtime?.kind === 'timeline' ? 'timeline' : 'live',
+  };
   if (lessonId !== undefined && lessonId !== null && String(lessonId) !== '') {
     options.lessonId = String(lessonId);
   }
