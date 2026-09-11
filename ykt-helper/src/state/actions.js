@@ -14,15 +14,19 @@ import { createEventReminder, createPublishReminder } from './publish-reminder.j
 import { screenWakeLock } from '../core/screen-wake-lock.js';
 import { isReminderEnabled } from '../core/reminder-preferences.js';
 import { isCurrentPublishEvent } from '../core/publish-events.js';
+import { compareParsedAnswers, isWithinAnswerPriorityWindow, selectAnswerProfile } from '../core/answer-priority.js';
 import { getProblemEndTime } from './problem-timing.js';
 import { createDanmuFollowController } from '../core/danmu-follow.js';
 import { sendDanmuText } from '../core/danmu-sender.js';
 import { syncActiveLessons, getLessonId } from '../core/active-lessons.js';
+import { createNavigationArbiter, pickLatestActiveLesson } from '../core/navigation-arbiter.js';
 
 let _autoLoopStarted = false;
 let _autoJoinStarted = false;
 let _autoOnLessonClickStarted = false;
 let _autoOnLessonClickInProgress = false;
+let _navigationArbiter = null;
+let _autoJumpRetryTimer = null;
 let _routerHooked = false;
 const publishReminder = createPublishReminder({
   notify: event => ui.notifyPublish(event),
@@ -100,9 +104,10 @@ function notifyProblemStart(data, problem, slide, lessonId = null) {
 
 function notifyAutoAnswer(kind, problem, detail) {
   const [title, defaultDetail] = AUTO_ANSWER_EVENT_META[kind] || ['自动作答提示', '自动作答状态发生变化。'];
+  const lessonId = repo.problemStatus.get(problem?.problemId)?.lessonId || repo.currentLessonId || 'unknown';
   return ui.notifyClassroomEvent({
     kind,
-    dedupeKey: `${kind}:${problem?.problemId || Date.now()}`,
+    dedupeKey: `${kind}:${lessonId}:${problem?.problemId || Date.now()}`,
     title,
     detail: detail || defaultDetail,
     problem,
@@ -155,6 +160,87 @@ export function hasActiveAIProfile(aiCfg) {
   return !!cfg.kimiApiKey;
 }
 
+function selectAutoAnswerProfile(role = 'active', now = Date.now()) {
+  const aiConfig = ui.config.ai || {};
+  return selectAnswerProfile(aiConfig, {
+    role,
+    now,
+    windows: ui.config.answerPriorityWindows,
+    fastProfileId: ui.config.fastAnswerProfileId,
+    verifyProfileId: ui.config.verifyAnswerProfileId,
+  });
+}
+
+function getUsableAutoAnswerProfile(role, now = Date.now()) {
+  const candidate = selectAutoAnswerProfile(role, now);
+  if (candidate?.apiKey) return candidate;
+
+  const active = selectAutoAnswerProfile('active', now);
+  return active?.apiKey ? active : candidate;
+}
+
+function hasSelectedAIProfile(profile, aiCfg) {
+  return !!profile?.apiKey || (!Array.isArray(aiCfg?.profiles) && !!aiCfg?.kimiApiKey);
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+async function verifyAutoAnswer({ problem, imageBase64, textPrompt, firstAnswer, firstRawAnswer, status, forceRetry }) {
+  if (ui.config.answerVerification !== true) {
+    return { answer: firstAnswer, rawAnswer: firstRawAnswer, state: 'disabled' };
+  }
+
+  const verifyProfileId = String(ui.config.verifyAnswerProfileId || '').trim();
+  if (!verifyProfileId) {
+    return { answer: firstAnswer, rawAnswer: firstRawAnswer, state: 'not-configured' };
+  }
+
+  const verifyProfile = selectAutoAnswerProfile('verify');
+  if (!verifyProfile?.apiKey || String(verifyProfile.id) !== verifyProfileId) {
+    return { answer: firstAnswer, rawAnswer: firstRawAnswer, state: 'unavailable' };
+  }
+
+  const delay = Math.max(0, Number(ui.config.answerVerificationDelay) || 0);
+  if (delay > 0) await sleep(delay);
+
+  const verificationPrompt = [
+    textPrompt,
+    '',
+    '【快速模型候选答案】',
+    JSON.stringify(firstAnswer),
+    '',
+    '请使用当前课件图片和题干独立复核候选答案。不要盲从候选答案；如果候选答案错误，请给出你认为正确的答案。',
+    '必须按原题型要求输出，并包含“答案:”字段；只输出最终答案和必要的简短解释。',
+  ].join('\n');
+
+  const verifiedRawAnswer = await queryAIVision(
+    imageBase64,
+    verificationPrompt,
+    ui.config.ai,
+    {
+      profileId: verifyProfile.id,
+      problemType: problem.problemType,
+    },
+  );
+  const verifiedAnswer = parseAIAnswer(problem, verifiedRawAnswer);
+  if (!verifiedAnswer) {
+    return { answer: firstAnswer, rawAnswer: firstRawAnswer, state: 'invalid' };
+  }
+  if (compareParsedAnswers(problem, firstAnswer, verifiedAnswer)) {
+    return { answer: firstAnswer, rawAnswer: verifiedRawAnswer, state: 'confirmed' };
+  }
+
+  await submitAnswer(problem, verifiedAnswer, {
+    startTime: status.startTime,
+    endTime: status.endTime,
+    forceRetry,
+    lessonId: status.lessonId || repo.currentLessonId,
+  });
+  return { answer: verifiedAnswer, rawAnswer: verifiedRawAnswer, state: 'corrected' };
+}
+
 // 融合模式自动答题
 async function handleAutoAnswerInternal(problem, { forceRetry = false } = {}) {
   const status = repo.problemStatus.get(problem.problemId);
@@ -184,7 +270,17 @@ async function handleAutoAnswerInternal(problem, { forceRetry = false } = {}) {
     console.log('[雨课堂助手][INFO][AutoAnswer] 题目类型:', PROBLEM_TYPE_MAP[problem.problemType]);
     console.log('[雨课堂助手][INFO][AutoAnswer] 题目内容:', problem.body?.slice(0, 50) + '...');
     
-    if (!hasActiveAIProfile(ui.config.ai)) {
+    const answerNow = Date.now();
+    const priorityWindow = isWithinAnswerPriorityWindow(answerNow, ui.config.answerPriorityWindows);
+    const answerProfile = getUsableAutoAnswerProfile(priorityWindow ? 'fast' : 'active', answerNow);
+    const hasAnswerAI = hasSelectedAIProfile(answerProfile, ui.config.ai);
+    console.log('[雨课堂助手][INFO][AutoAnswer] 答题模型:', {
+      profileId: answerProfile?.id || 'legacy/default',
+      priorityWindow,
+      verificationEnabled: ui.config.answerVerification === true,
+    });
+
+    if (!hasAnswerAI) {
     // ✅ 无 API Key：使用本地默认答案直接提交，确保流程不中断
     // 
       const parsed = makeDefaultAnswer(problem);
@@ -242,7 +338,10 @@ async function handleAutoAnswerInternal(problem, { forceRetry = false } = {}) {
     
     // 调用 AI
     ui.toast('AI 正在分析题目...', 2000);
-    const aiAnswer = await queryAIVision(imageBase64, textPrompt, ui.config.ai);
+    const aiAnswer = await queryAIVision(imageBase64, textPrompt, ui.config.ai, {
+      profileId: answerProfile?.id,
+      problemType: problem.problemType,
+    });
     console.log('[雨课堂助手][INFO][AutoAnswer] AI回答:', aiAnswer);
     
     // 解析答案
@@ -258,24 +357,57 @@ async function handleAutoAnswerInternal(problem, { forceRetry = false } = {}) {
 
     console.log('[雨课堂助手][INFO][AutoAnswer] 准备提交答案:', JSON.stringify(parsed));
     
-    // 提交答案
+    // 先提交快速模型答案
     await submitAnswer(problem, parsed, {
       startTime: status.startTime,
       endTime: status.endTime,
       forceRetry: shouldForceRetry,
       lessonId: status.lessonId || repo.currentLessonId,
     });
-    
-    console.log('[雨课堂助手][INFO][AutoAnswer] 提交成功');
+
+    console.log('[雨课堂助手][INFO][AutoAnswer] 首次提交成功');
+
+    let finalAnswer = parsed;
+    let finalRawAnswer = aiAnswer;
+    let verificationState = 'disabled';
+    try {
+      const verification = await verifyAutoAnswer({
+        problem,
+        imageBase64,
+        textPrompt,
+        firstAnswer: parsed,
+        firstRawAnswer: aiAnswer,
+        status,
+        forceRetry: shouldForceRetry,
+      });
+      finalAnswer = verification.answer;
+      finalRawAnswer = verification.rawAnswer;
+      verificationState = verification.state;
+      if (verificationState === 'corrected') {
+        console.log('[雨课堂助手][INFO][AutoAnswer] 验证模型发现差异，已重新提交答案');
+      }
+    } catch (verificationError) {
+      verificationState = 'unavailable';
+      console.warn('[雨课堂助手][WARN][AutoAnswer] 验证模型失败，保留首次提交:', verificationError);
+    }
+
+    console.log('[雨课堂助手][INFO][AutoAnswer] 作答流程完成:', verificationState);
     
     // 更新状态
-    actions.onAnswerProblem(problem.problemId, parsed);
+    actions.onAnswerProblem(problem.problemId, finalAnswer);
     status.done = true;
     status.answering = false;
-    notifyAutoAnswer('auto-answer-succeeded', problem);
+    const successDetail = verificationState === 'corrected'
+      ? '快速答案已提交，验证模型发现错误并完成修正。'
+      : verificationState === 'confirmed'
+        ? '答案已提交，并通过验证模型复核。'
+        : verificationState === 'unavailable' || verificationState === 'invalid'
+          ? '答案已提交，但验证模型暂未完成复核。'
+          : undefined;
+    notifyAutoAnswer('auto-answer-succeeded', problem, successDetail);
     
     ui.toast(`自动作答完成`, 3000);
-    showAutoAnswerPopup(problem, aiAnswer);
+    showAutoAnswerPopup(problem, finalRawAnswer);
     
   } catch (e) {
     console.error('[雨课堂助手][ERR][AutoAnswer] 失败:', e);
@@ -596,6 +728,11 @@ export const actions = {
 
   stopAutoJoinLoop() {
     repo.autoJoinRunning = false;
+    _navigationArbiter?.cancel();
+    if (_autoJumpRetryTimer !== null) {
+      clearTimeout(_autoJumpRetryTimer);
+      _autoJumpRetryTimer = null;
+    }
   },
 
   /** 统一判断并启动自动加入链路（可多次调用，内部防重） */
@@ -610,7 +747,10 @@ export const actions = {
     if (_routerHooked) return;
     _routerHooked = true;
     const uw = (gm && gm.uw) ? gm.uw : (window.unsafeWindow || window);
-    const rearm = () => {
+    const rearm = ({ userIntent = true } = {}) => {
+      // 任何站内路由变化都视为用户已经做出选择；自动跳转只拥有当前页面的
+      // 一次机会，不能在用户切换课件后再次抢回导航权。
+      if (userIntent) _navigationArbiter?.observeUserIntent();
       // 重置一次“onlesson 点击守卫”的进行中标记，避免被卡住
       _autoOnLessonClickInProgress = false;
       // 每次路由变更都尝试启动（内部有防重，所以安全）
@@ -628,126 +768,94 @@ export const actions = {
     wrap(uw.history, 'pushState');
     wrap(uw.history, 'replaceState');
     uw.addEventListener('popstate', rearm);
-    uw.addEventListener('visibilitychange', () => { if (!document.hidden) rearm(); });
+    uw.addEventListener('visibilitychange', () => {
+      if (!document.hidden) rearm({ userIntent: false });
+    });
   },
 
-  // ===== 自动点击“正在上课”条：无需预先拿 lesson_id，复用官方路由逻辑 =====
+  // ===== 自动跳转“正在上课”课堂：先给用户十秒选择时间 =====
   startAutoClickOnOnLessonBar() {
     if (_autoOnLessonClickStarted) return;
-    _autoOnLessonClickStarted = true;
 
     // 仅在非课堂页（首页/课表页等）生效
     if (/\/lesson\//.test(location.pathname)) return;
+    _autoOnLessonClickStarted = true;
 
     const uw = (gm && gm.uw) ? gm.uw : (window.unsafeWindow || window);
 
-    async function tryApiJumpFirst() {
-      if (_autoOnLessonClickInProgress) return false;
-      _autoOnLessonClickInProgress = true;
-      try {
-        const list = await getOnLesson();              // ← 强化后的版本
-        const arr = Array.isArray(list) ? list : [];
-        // A) 严格：status===1
-        let on = arr.find(x => (x?.status === 1) && (x.lessonId || x.lesson_id || x.id));
-        // B) 回退：没有严格匹配，但有 lessonId 就用第一条
-        if (!on) {
-          const withId = arr.find(x => (x && (x.lessonId || x.lesson_id || x.id)));
-          if (withId) {
-            console.warn('[雨课堂助手][WARN][AutoJoin][API] 没有 status===1，但存在 lessonId，使用回退项：', {
-              status: withId.status,
-              keys: Object.keys(withId || {}),
-              sample: withId
-            });
-            on = withId;
-          }
-        }
-        if (!on) {
-          // 详细日志：环境、主机、列表长度与前 3 项
-          try {
-            console.warn('[雨课堂助手][ERR][AutoJoin][API] EMPTY on-lesson list', {
-              host: location.hostname,
-              path: location.pathname,
-              length: Array.isArray(list) ? list.length : -1,
-              sample: Array.isArray(list) ? list.slice(0, 3) : list
-            });
-          } catch {}
-          _autoOnLessonClickInProgress = false; 
-          return false;
-        }
-        const lessonId = on.lessonId || on.lesson_id || on.id;
-        let target = null;
-        
-        if (lessonId) target = `/lesson/fullscreen/v3/${lessonId}`;
-        else     target = `/v2/web/lesson/${lessonId}`; 
-        if (location.pathname === target) { _autoOnLessonClickInProgress = false; return true; }
+    _navigationArbiter = createNavigationArbiter({
+      waitMs: 10_000,
+      navigate: target => {
+        console.log('[雨课堂助手][INFO][AutoJoin] 十秒内无用户操作，自动进入最新课堂:', target);
+        (uw.location || location).assign(target);
+      },
+    });
 
-        // 为了少日志，先 replace 再 assign（站内有时也会 push /index）
-        history.replaceState(null, '', location.href);
-        location.assign(target);
-        return true;
-      } catch (e) {
-        console.warn('[雨课堂助手][ERR][AutoJoin][API] 跳转失败：', e, {
-          host: location.hostname,
-          path: location.pathname
-        });
-        _autoOnLessonClickInProgress = false;
+    const cancelAutomaticNavigation = (event) => {
+      // 脚本内部的合成事件不能夺走用户的导航选择权；真实输入才算用户操作。
+      if (event?.isTrusted === false) return;
+      if (_navigationArbiter.observeUserIntent()) {
+        console.log('[雨课堂助手][INFO][AutoJoin] 检测到用户操作，取消自动跳转');
+      }
+      if (_autoJumpRetryTimer !== null) {
+        clearTimeout(_autoJumpRetryTimer);
+        _autoJumpRetryTimer = null;
+      }
+    };
+
+    const doc = uw.document || document;
+    for (const eventName of ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'wheel']) {
+      doc.addEventListener(eventName, cancelAutomaticNavigation, {
+        capture: true,
+        passive: eventName === 'wheel' || eventName === 'touchstart',
+      });
+    }
+
+    async function offerLatestClassroom() {
+      if (_autoOnLessonClickInProgress || _navigationArbiter.userHasIntent || _navigationArbiter.hasPending) {
         return false;
       }
-    }
-
-    function attachGuardAndTrigger(root = uw.document) {
-      const bar = root.querySelector('.onlesson .jump_lesson__bar');
-      if (!bar || bar.__ykt_guard_bound__) return false;
-      if (_autoOnLessonClickInProgress) return false;
-
-      bar.__ykt_guard_bound__ = true;
-      console.log('[雨课堂助手][INFO][AutoJoin][DOM] 发现 onlesson 条，接管点击（捕获阶段）');
-
-      const handler = async (ev) => {
-        ev.preventDefault();
-        ev.stopImmediatePropagation?.();
-        ev.stopPropagation();
-        if (_autoOnLessonClickInProgress) return;
-
-        // 延时阶梯：考虑 WS 刚推完 banner 但接口还没更新
-        const delays = [0, 250, 600, 1200, 2000, 3000];
-        for (const d of delays) {
-          if (d) await new Promise(r => setTimeout(r, d));
-          if (await tryApiJumpFirst()) return;
-        }
-        console.warn('[雨课堂助手][WARN][AutoJoin][DOM] on-lesson 接口仍为空，放弃本次点击');
-        try {
-          console.group('%c[AutoJoin][DOM] on-lesson 仍为空，放弃本次点击', 'color:#f60');
-          console.log('env:', { host: location.hostname, path: location.pathname, href: location.href });
-          console.log('retryDelays(ms):', delays);
-          console.log('hint:', '可能是域/路径不匹配、会话未带上、或 WS/接口不同步导致。请展开上方 [getOnLesson] 折叠日志查看每个候选 URL 的状态与响应片段。');
-          console.groupEnd();
-        } catch {}
-      };
-
-      bar.addEventListener('click', handler, { capture: true });
-      // 触发一次我们自己的 click（优先进入捕获处理器）
+      _autoOnLessonClickInProgress = true;
       try {
-        const W = bar.ownerDocument?.defaultView || uw;
-        const ClickEvt = W.MouseEvent || uw.MouseEvent;
-        bar.dispatchEvent(new ClickEvt('click', { bubbles: true, cancelable: true, view: W }));
-      } catch (e) {
-        // 兜底：部分环境对 MouseEvent 构造器有限制
-        try { bar.click(); } catch (_) {}
+        const list = await getOnLesson();
+        const latest = pickLatestActiveLesson(list);
+        if (!latest) {
+          console.log('[雨课堂助手][INFO][AutoJoin] 当前没有 status=1 的活跃课堂，暂不跳转');
+          return false;
+        }
+
+        const lessonId = getLessonId(latest);
+        const target = `/lesson/fullscreen/v3/${lessonId}`;
+        const currentPath = (uw.location || location).pathname;
+        if (currentPath === target) return true;
+
+        const offered = _navigationArbiter.offer(target);
+        if (offered) {
+          console.log('[雨课堂助手][INFO][AutoJoin] 已找到最新活跃课堂，等待十秒确认:', lessonId);
+        }
+        return offered;
+      } catch (error) {
+        console.warn('[雨课堂助手][WARN][AutoJoin][API] 获取最新活跃课堂失败:', error);
+        return false;
+      } finally {
+        _autoOnLessonClickInProgress = false;
       }
-      return true;
     }
 
-    // A) 首选：直接 API 跳转（若此时就能拿到 on-lesson，就不必等 DOM）
-    tryApiJumpFirst().then((ok) => {
-      if (ok) return;
-      // B) DOM 渲染后接管点击
-      if (attachGuardAndTrigger()) return;
-      const mo = new uw.MutationObserver(() => {
-        if (attachGuardAndTrigger()) { mo.disconnect(); return; }
-      });
-      mo.observe(uw.document.documentElement, { childList: true, subtree: true });
-      // setTimeout(() => mo.disconnect(), 10000);
+    const retryOffer = () => {
+      if (_navigationArbiter.userHasIntent || _navigationArbiter.hasPending || /\/lesson\//.test((uw.location || location).pathname)) {
+        _autoJumpRetryTimer = null;
+        return;
+      }
+      _autoJumpRetryTimer = setTimeout(async () => {
+        _autoJumpRetryTimer = null;
+        const offered = await offerLatestClassroom();
+        if (!offered) retryOffer();
+      }, 5000);
+    };
+
+    void offerLatestClassroom().then(offered => {
+      if (!offered) retryOffer();
     });
   },
 };
