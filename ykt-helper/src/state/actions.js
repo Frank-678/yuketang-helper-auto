@@ -16,6 +16,7 @@ import { isReminderEnabled } from '../core/reminder-preferences.js';
 import { getProblemEndTime } from './problem-timing.js';
 import { createDanmuFollowController } from '../core/danmu-follow.js';
 import { sendDanmuText } from '../core/danmu-sender.js';
+import { syncActiveLessons, getLessonId } from '../core/active-lessons.js';
 
 let _autoLoopStarted = false;
 let _autoJoinStarted = false;
@@ -320,7 +321,7 @@ export const actions = {
     ui.updatePresentationList();
   },
 
-  onUnlockProblem(data, { notificationOnly = false } = {}) {
+  onUnlockProblem(data, { notificationOnly = false, lessonId = null } = {}) {
     const payload = data && typeof data === 'object' ? data : {};
     const problemId = firstValue(
       payload.prob,
@@ -347,6 +348,7 @@ export const actions = {
     const status = {
       presentationId: payload.pres,
       slideId,
+      lessonId: lessonId ? String(lessonId) : repo.currentLessonId,
       startTime: payload.dt,
       endTime: getProblemEndTime(payload.dt, payload.limit),
       done: !!problem.result,
@@ -376,10 +378,16 @@ export const actions = {
     return notified;
   },
 
-  onPublishEvent(event) {
-    const notified = publishReminder.handle(event, ui.config);
+  onPublishEvent(event, { lessonId = null } = {}) {
+    const contextualEvent = {
+      ...event,
+      lessonId: event?.lessonId || (lessonId ? String(lessonId) : null),
+      currentLessonId: repo.currentLessonId,
+      currentPresentationId: repo.currentPresentationId,
+    };
+    const notified = publishReminder.handle(contextualEvent, ui.config);
     if (notified) {
-      console.log('[雨课堂助手][INFO][Publish] 已提醒发布事件:', event.category, event.dedupeKey);
+      console.log('[雨课堂助手][INFO][Publish] 已提醒发布事件:', contextualEvent.category, contextualEvent.dedupeKey);
     }
     return notified;
   },
@@ -409,12 +417,15 @@ export const actions = {
     return result;
   },
 
-  onLessonFinished() {
+  onLessonFinished({ lessonId = null } = {}) {
+    const eventLessonId = lessonId ? String(lessonId) : repo.currentLessonId;
     return ui.notifyClassroomEvent({
       kind: 'lesson-finished',
-      dedupeKey: `lesson-finished:${repo.currentLessonId || Date.now()}`,
+      dedupeKey: `lesson-finished:${eventLessonId || Date.now()}`,
       title: '下课提示',
-      detail: '当前课程已结束。',
+      detail: eventLessonId && eventLessonId !== repo.currentLessonId
+        ? `课堂 ${eventLessonId} 已结束。`
+        : '当前课程已结束。',
     });
   },
 
@@ -525,11 +536,19 @@ export const actions = {
       if (!repo.autoJoinRunning) return;
       try {
         const list = await getOnLesson();
-        // 期望结构：每项至少含 { lessonId, status }，其中 status==1 表示正在上课
-        for (const it of list) {
-          const lessonId = it.lessonId || it.lesson_id || it.id;
-          const status = it.status;
-          if (!lessonId || status !== 1) continue;
+        const snapshot = syncActiveLessons([...repo.activeLessons.values()], list);
+        repo.activeLessons.clear();
+        for (const item of snapshot.active) repo.activeLessons.set(item.lessonId, item);
+
+        for (const staleLessonId of snapshot.removed) {
+          const staleSocket = repo.lessonSockets.get(staleLessonId);
+          repo.markLessonDisconnected(staleLessonId, 'inactive');
+          try { staleSocket?.close?.(); } catch {}
+        }
+
+        // 每个 status===1 的课堂都独立建立或复用连接。
+        for (const it of snapshot.active) {
+          const lessonId = getLessonId(it);
           if (repo.isLessonConnected(lessonId)) continue; // 已有连接
 
           console.log('[雨课堂助手][INFO][AutoJoin] 检测到正在上课的课堂，准备进入:', lessonId);
