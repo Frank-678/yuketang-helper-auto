@@ -12,6 +12,7 @@ export const PROBLEM_TYPE_MAP = {
 export const DEFAULT_CONFIG = {
   ...REMINDER_DEFAULTS,
   autoAnswer: false,
+  autoForceRetry: false,
   autoAnswerDelay: 3000,
   autoAnswerRandomDelay: 2000,
   autoFollowDanmu: false,

@@ -79,6 +79,7 @@ export function mountSettingsPanel() {
   const $autoJoin = root.querySelector('#ykt-input-auto-join');
   const $autoJoinAutoAnswer = root.querySelector('#ykt-input-auto-join-auto-answer');
   const $autoAnalyze = root.querySelector('#ykt-input-ai-auto-analyze');
+  const $autoForceRetry = root.querySelector('#ykt-input-auto-force-retry');
   const $delay = root.querySelector('#ykt-input-answer-delay');
   const $rand = root.querySelector('#ykt-input-random-delay');
   const $priority = root.querySelector('#ykt-ai-pick-main-first');
@@ -206,6 +207,7 @@ export function mountSettingsPanel() {
     $autoJoin.checked = !!ui.config.autoJoinEnabled;
     $autoJoinAutoAnswer.checked = !!ui.config.autoAnswerOnAutoJoin;
     $auto.checked = !!ui.config.autoAnswer;
+    $autoForceRetry.checked = !!ui.config.autoForceRetry;
     $autoAnalyze.checked = !!ui.config.aiAutoAnalyze;
     $iftex.checked = !!ui.config.iftex;
     $delay.value = Math.floor((ui.config.autoAnswerDelay || 3000) / 1000);
@@ -262,6 +264,7 @@ export function mountSettingsPanel() {
     ui.config.autoJoinEnabled = !!$autoJoin.checked;
     ui.config.autoAnswerOnAutoJoin = !!$autoJoinAutoAnswer.checked;
     ui.config.autoAnswer = !!$auto.checked;
+    ui.config.autoForceRetry = !!$autoForceRetry.checked;
     ui.config.aiAutoAnalyze = !!$autoAnalyze.checked;
     ui.config.autoAnswerDelay = Math.max(1000, (+$delay.value || 0) * 1000);
     ui.config.autoAnswerRandomDelay = Math.max(0, (+$rand.value || 0) * 1000);

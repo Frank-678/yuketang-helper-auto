@@ -70,7 +70,7 @@ function firstValue(...values) {
   return values.find(value => value !== undefined && value !== null && String(value).trim() !== '');
 }
 
-function notifyProblemStart(data, problem, slide) {
+function notifyProblemStart(data, problem, slide, lessonId = null) {
   const payload = data && typeof data === 'object' ? data : {};
   const problemId = firstValue(
     problem?.problemId,
@@ -89,7 +89,7 @@ function notifyProblemStart(data, problem, slide) {
 
   return problemStartReminder.handle({
     kind: 'problem-start',
-    dedupeKey: `problem-start:${problemId || payload.sid || payload.dt || 'unknown'}`,
+    dedupeKey: `problem-start:${lessonId || 'unknown'}:${problemId || payload.sid || payload.dt || 'unknown'}`,
     title: '习题已发布',
     nativeTitle: '雨课堂习题提示',
     detail,
@@ -156,7 +156,7 @@ export function hasActiveAIProfile(aiCfg) {
 }
 
 // 融合模式自动答题
-async function handleAutoAnswerInternal(problem) {
+async function handleAutoAnswerInternal(problem, { forceRetry = false } = {}) {
   const status = repo.problemStatus.get(problem.problemId);
   if (!status || status.answering || problem.result) {
     console.log('[AutoAnswer] 跳过：', {
@@ -167,7 +167,9 @@ async function handleAutoAnswerInternal(problem) {
     return;
   }
   
-  if (Number.isFinite(status.endTime) && Date.now() >= status.endTime) {
+  const expired = Number.isFinite(status.endTime) && Date.now() >= status.endTime;
+  const shouldForceRetry = forceRetry === true || (expired && ui.config.autoForceRetry === true);
+  if (expired && !shouldForceRetry) {
     console.log('[雨课堂助手][WARN][AutoAnswer] 跳过：已超时');
     return;
   }
@@ -192,8 +194,8 @@ async function handleAutoAnswerInternal(problem) {
       await submitAnswer(problem, parsed, {
         startTime: status.startTime,
         endTime: status.endTime,
-        forceRetry: false,
-        lessonId: repo.currentLessonId,
+        forceRetry: shouldForceRetry,
+        lessonId: status.lessonId || repo.currentLessonId,
       });
 
       // 更新状态与UI
@@ -260,8 +262,8 @@ async function handleAutoAnswerInternal(problem) {
     await submitAnswer(problem, parsed, {
       startTime: status.startTime,
       endTime: status.endTime,
-      forceRetry: false,
-      lessonId: repo.currentLessonId
+      forceRetry: shouldForceRetry,
+      lessonId: status.lessonId || repo.currentLessonId,
     });
     
     console.log('[雨课堂助手][INFO][AutoAnswer] 提交成功');
@@ -336,7 +338,7 @@ export const actions = {
     const problem = repo.problems.get(problemId);
     const slide = repo.slides.get(slideId);
     if (!problem || !slide) {
-      if (notificationOnly) return notifyProblemStart(payload, problem, slide);
+      if (notificationOnly) return notifyProblemStart(payload, problem, slide, lessonId);
       console.log('[雨课堂助手][ERR][onUnlockProblem] 题目或幻灯片不存在');
       return false;
     }
@@ -358,16 +360,23 @@ export const actions = {
     };
     repo.problemStatus.set(problemId, status);
 
-    if ((Number.isFinite(status.endTime) && Date.now() > status.endTime) || problem.result) {
-      console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已过期或已作答，跳过');
-      return;
+    const expired = Number.isFinite(status.endTime) && Date.now() >= status.endTime;
+    const notified = notifyProblemStart(payload, problem, slide, lessonId);
+    if (notificationOnly) return notified;
+    if (problem.result) {
+      console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已作答，跳过自动流程');
+      return notified;
+    }
+    if (expired && ui.config.autoForceRetry !== true) {
+      console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已过期，未开启自动强制补交');
+      ui.updateActiveProblems();
+      return notified;
     }
 
-    const notified = notifyProblemStart(payload, problem, slide);
-    if (notificationOnly) return notified;
-
     if (ui.config.autoAnswer) {
-      const delay = ui.config.autoAnswerDelay + randInt(0, ui.config.autoAnswerRandomDelay);
+      const delay = expired
+        ? 0
+        : ui.config.autoAnswerDelay + randInt(0, ui.config.autoAnswerRandomDelay);
       status.autoAnswerTime = Date.now() + delay;
       
       console.log(`[雨课堂助手][INFO][onUnlockProblem] 将在 ${Math.floor(delay / 1000)} 秒后自动作答`);
