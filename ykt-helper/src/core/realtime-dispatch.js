@@ -11,7 +11,10 @@ export function dispatchRealtimeMessage(message, {
   lessonId = null,
   handlers = {},
 } = {}) {
-  const realtime = getRealtimeEvent(message);
+  const eventContext = lessonId !== undefined && lessonId !== null && String(lessonId) !== ''
+    ? { lessonId: String(lessonId) }
+    : {};
+  const realtime = getRealtimeEvent(message, eventContext);
   const notificationOnly = getRuntimeMode() === 'mobile-reminder';
   const options = { notificationOnly };
   if (lessonId !== undefined && lessonId !== null && String(lessonId) !== '') {

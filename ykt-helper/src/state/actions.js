@@ -13,6 +13,7 @@ import { connectOrAttachLessonWS } from '../net/ws-interceptor.js';
 import { createEventReminder, createPublishReminder } from './publish-reminder.js';
 import { screenWakeLock } from '../core/screen-wake-lock.js';
 import { isReminderEnabled } from '../core/reminder-preferences.js';
+import { isCurrentPublishEvent } from '../core/publish-events.js';
 import { getProblemEndTime } from './problem-timing.js';
 import { createDanmuFollowController } from '../core/danmu-follow.js';
 import { sendDanmuText } from '../core/danmu-sender.js';
@@ -385,6 +386,13 @@ export const actions = {
       currentLessonId: repo.currentLessonId,
       currentPresentationId: repo.currentPresentationId,
     };
+    if (isCurrentPublishEvent(contextualEvent, contextualEvent)) {
+      console.log('[雨课堂助手][INFO][Publish] 忽略当前正在查看的课件发布事件:', {
+        lessonId: contextualEvent.lessonId,
+        presentationId: contextualEvent.presentationId || contextualEvent.entityId,
+      });
+      return false;
+    }
     const notified = publishReminder.handle(contextualEvent, ui.config);
     if (notified) {
       console.log('[雨课堂助手][INFO][Publish] 已提醒发布事件:', contextualEvent.category, contextualEvent.dedupeKey);

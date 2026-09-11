@@ -10,6 +10,7 @@ const ENTITY_KEYS = [
   'problem', 'presentation', 'courseware', 'activity',
 ];
 const NESTED_PAYLOAD_KEYS = ['data', 'payload', 'result', 'content'];
+const OPERATION_KEYS = ['op', 'type', 'action', 'event', 'eventType'];
 
 // 保留导出，避免其他脚本依赖旧名称；真实配置集中在 reminder-preferences。
 export const PUBLISH_REMINDER_DEFAULTS = {
@@ -18,11 +19,45 @@ export const PUBLISH_REMINDER_DEFAULTS = {
   notifyOtherPublishes: REMINDER_DEFAULTS.notifyOtherPublishes,
 };
 
-function normalizeOp(message) {
-  return String(message?.op || message?.type || '')
+function normalizeOperation(value) {
+  return String(value ?? '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
+}
+
+function operationFrom(source) {
+  for (const key of OPERATION_KEYS) {
+    const value = source?.[key];
+    if (value === undefined || value === null || typeof value === 'object') continue;
+    const normalized = normalizeOperation(value);
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function normalizeOp(message) {
+  const direct = operationFrom(message);
+  if (direct && !['message', 'event', 'data', 'payload'].includes(direct)) return direct;
+
+  const queue = [];
+  for (const key of NESTED_PAYLOAD_KEYS) {
+    const nested = message?.[key];
+    if (nested && typeof nested === 'object') queue.push(nested);
+  }
+  const visited = new Set();
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object' || visited.has(current)) continue;
+    visited.add(current);
+    const nestedOp = operationFrom(current);
+    if (nestedOp) return nestedOp;
+    for (const key of NESTED_PAYLOAD_KEYS) {
+      const nested = current[key];
+      if (nested && typeof nested === 'object') queue.push(nested);
+    }
+  }
+  return direct;
 }
 
 function includesOneOf(value, markers) {
@@ -106,6 +141,17 @@ function getDetail(message, entity) {
     || '教师发布了新的课堂内容';
 }
 
+function getLessonId(message, context = {}) {
+  return firstText(context, ['lessonId', 'lesson_id', 'lessonid'])
+    || findNestedText(message, ['lessonId', 'lesson_id', 'lessonid']);
+}
+
+function getPresentationId(message, category, entityId) {
+  return category === 'courseware'
+    ? entityId
+    : findNestedText(message, ['presentationId', 'presentation_id', 'presentationid', 'pres']);
+}
+
 function getCategory(op) {
   if (op === 'unlockproblem') return null;
   if (op === 'probleminfo') return 'assessment';
@@ -121,13 +167,15 @@ function getCategory(op) {
   return null;
 }
 
-export function classifyPublishEvent(message) {
+export function classifyPublishEvent(message, context = {}) {
   const op = normalizeOp(message);
   const category = getCategory(op);
   if (!category) return null;
 
   const entity = getEntity(message);
   const id = getIdentifier(message, entity, op);
+  const lessonId = getLessonId(message, context);
+  const presentationId = getPresentationId(message, category, id);
   const detail = getDetail(message, entity);
   const title = {
     assessment: '考试/测试题组已发布',
@@ -135,12 +183,32 @@ export function classifyPublishEvent(message) {
     other: '课堂内容已发布',
   }[category];
 
-  return {
+  const event = {
     category,
-    dedupeKey: `${category}:${id}`,
+    dedupeKey: `${category}:${lessonId ? `${lessonId}:` : ''}${id}`,
     title,
     detail,
   };
+
+  if (lessonId || Object.keys(context).length > 0) {
+    if (lessonId) event.lessonId = lessonId;
+    event.entityId = id;
+    if (presentationId) event.presentationId = presentationId;
+  }
+  return event;
+}
+
+export function isCurrentPublishEvent(event, {
+  currentLessonId = null,
+  currentPresentationId = null,
+} = {}) {
+  if (!event?.lessonId || !currentLessonId) return false;
+  if (String(event.lessonId) !== String(currentLessonId)) return false;
+  if (!currentPresentationId) return false;
+  const presentationId = event.presentationId || (
+    event.category === 'courseware' ? event.entityId : null
+  );
+  return !!presentationId && String(presentationId) === String(currentPresentationId);
 }
 
 export function isPublishReminderEnabled(event, config = {}) {
@@ -153,7 +221,7 @@ export function isPublishReminderEnabled(event, config = {}) {
   return kind ? isReminderEnabled(kind, config) : false;
 }
 
-export function getRealtimeEvent(message) {
+export function getRealtimeEvent(message, context = {}) {
   const op = normalizeOp(message);
 
   if (op === 'fetchtimeline') return { kind: 'timeline', timeline: message?.timeline };
@@ -167,6 +235,6 @@ export function getRealtimeEvent(message) {
   }
   if (op === 'lessonfinished') return { kind: 'lessonfinished' };
 
-  const event = classifyPublishEvent(message);
+  const event = classifyPublishEvent(message, context);
   return event ? { kind: 'publish', event } : null;
 }
