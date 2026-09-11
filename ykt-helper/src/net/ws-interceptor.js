@@ -5,6 +5,11 @@ import { repo } from '../state/repo.js';
 import { dispatchRealtimeMessage } from '../core/realtime-dispatch.js';
 import { confirmDanmuSend } from '../core/danmu-sender.js';
 
+// connectOrAttachLessonWS constructs a managed socket synchronously. During
+// that constructor call, do not mistake the current page route for a native
+// socket belonging to the foreground lesson.
+let pendingManagedLessonId = null;
+
 function lessonIdFromPath(pathname = '') {
   const match = String(pathname).match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
   return match ? match[1] : null;
@@ -72,6 +77,19 @@ MyWebSocket.addHandler((ws, url) => {
       return;
     }
     console.log('[雨课堂助手][INFO] 检测到雨课堂WebSocket连接:', wsPath);
+
+    const routeLessonId = lessonIdFromPath((gm.uw || window)?.location?.pathname || location.pathname);
+    if (routeLessonId && !pendingManagedLessonId) {
+      ws.__yktLessonId = routeLessonId;
+      repo.markLessonConnected(routeLessonId, ws);
+      const clearNativeSocket = () => {
+        if (repo.lessonSockets.get(routeLessonId) === ws) {
+          repo.markLessonDisconnected(routeLessonId, 'native-close');
+        }
+      };
+      ws.addEventListener('close', clearNativeSocket);
+      ws.addEventListener('error', clearNativeSocket);
+    }
 
     // 发送侧拦截（可用于调试）
     ws.intercept((message) => {
@@ -157,7 +175,13 @@ export function connectOrAttachLessonWS({ lessonId, auth }) {
   const host = "wss://" + location.hostname + "/wsapp/";
 
   const Socket = gm.uw?.WebSocket || WebSocket;
-  const ws = new Socket(host);
+  pendingManagedLessonId = String(lessonId);
+  let ws;
+  try {
+    ws = new Socket(host);
+  } finally {
+    pendingManagedLessonId = null;
+  }
   ws.__yktLessonId = String(lessonId);
 
   ws.addEventListener('open', () => {
