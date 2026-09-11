@@ -231,7 +231,7 @@ test('keeps exact text matching and ignores empty danmu messages', async () => {
 });
 
 test('sends a follow-up through the classroom input and send button', async () => {
-  const { sendDanmuText } = await import('../src/core/danmu-sender.js');
+  const { confirmDanmuSend, sendDanmuText } = await import('../src/core/danmu-sender.js');
   const events = [];
   const input = {
     value: '',
@@ -254,20 +254,27 @@ test('sends a follow-up through the classroom input and send button', async () =
     },
   };
 
-  const result = sendDanmuText('跟上这条', { root });
+  const pending = sendDanmuText('跟上这条', { root, awaitConfirmationMs: 50 });
+  assert.equal(confirmDanmuSend({ op: 'senddanmu', danmu: '跟上这条' }), 1);
+  const result = await pending;
 
-  assert.deepEqual(result, { sent: true, text: '跟上这条' });
+  assert.deepEqual(result, { sent: true, verified: true, text: '跟上这条' });
   assert.equal(input.value, '跟上这条');
   assert.deepEqual(events, ['input', 'change', 'click']);
 });
 
 test('reports when the classroom send controls are unavailable', async () => {
   const { sendDanmuText } = await import('../src/core/danmu-sender.js');
-  const result = sendDanmuText('跟上这条', {
+  const result = await sendDanmuText('跟上这条', {
     root: { querySelector: () => null },
   });
 
-  assert.deepEqual(result, { sent: false, text: '跟上这条', reason: 'controls-unavailable' });
+  assert.deepEqual(result, {
+    sent: false,
+    verified: false,
+    text: '跟上这条',
+    reason: 'controls-unavailable',
+  });
 });
 
 test('controller follows the burst winner and ignores its own echoed message', async () => {
@@ -285,7 +292,7 @@ test('controller follows the burst winner and ignores its own echoed message', a
   let triggered;
   for (let i = 0; i < 7; i += 1) {
     now = i;
-    triggered = controller.handle({
+    triggered = await controller.handle({
       op: 'newdanmu',
       danmu: i < 3 ? '跟上这条' : `其他${i}`,
       userid: i + 7,
@@ -297,7 +304,7 @@ test('controller follows the burst winner and ignores its own echoed message', a
   assert.deepEqual(sent, ['跟上这条']);
 
   now = 7;
-  const echo = controller.handle({ op: 'newdanmu', danmu: '跟上这条' });
+  const echo = await controller.handle({ op: 'newdanmu', danmu: '跟上这条' });
   assert.equal(echo.reason, 'own-echo');
   assert.deepEqual(sent, ['跟上这条']);
 });
@@ -314,7 +321,7 @@ test('controller does not track or send while disabled', async () => {
   });
 
   for (let i = 0; i < 3; i += 1) {
-    const result = controller.handle({ op: 'newdanmu', danmu: '不会跟发', userid: i });
+    const result = await controller.handle({ op: 'newdanmu', danmu: '不会跟发', userid: i });
     assert.equal(result.reason, 'disabled');
   }
 

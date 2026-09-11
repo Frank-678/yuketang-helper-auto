@@ -195,3 +195,75 @@ test('keeps unlockproblem metadata when the protocol sends a scalar problem id',
   assert.equal(realtime.problem.sid, 'slide-5');
   assert.equal(realtime.problem.pres, 'presentation-2');
 });
+
+test('adds lesson and presentation context to a publication event', async () => {
+  const { classifyPublishEvent } = await loadPublishEvents();
+
+  const event = classifyPublishEvent({
+    op: 'publishpresentation',
+    presentation: { id: 'ppt-9', title: '概率论第 2 讲' },
+  }, { lessonId: 'lesson-a' });
+
+  assert.equal(event.lessonId, 'lesson-a');
+  assert.equal(event.entityId, 'ppt-9');
+  assert.equal(event.presentationId, 'ppt-9');
+  assert.equal(event.dedupeKey, 'courseware:lesson-a:ppt-9');
+});
+
+test('recognizes a publication operation nested inside a websocket payload', async () => {
+  const { classifyPublishEvent } = await loadPublishEvents();
+
+  const event = classifyPublishEvent({
+    data: {
+      type: 'publishpresentation',
+      presentation: { id: 'ppt-nested', title: '嵌套课件' },
+    },
+  }, { lessonId: 'lesson-b' });
+
+  assert.equal(event.category, 'courseware');
+  assert.equal(event.lessonId, 'lesson-b');
+  assert.equal(event.presentationId, 'ppt-nested');
+});
+
+test('suppresses only the publication of the presentation currently being viewed', async () => {
+  const { classifyPublishEvent, isCurrentPublishEvent } = await loadPublishEvents();
+  const current = classifyPublishEvent({
+    op: 'publishpresentation',
+    presentation: { id: 'ppt-current', title: '当前课件' },
+  }, { lessonId: 'lesson-a' });
+  const other = classifyPublishEvent({
+    op: 'publishpresentation',
+    presentation: { id: 'ppt-other', title: '另一个课件' },
+  }, { lessonId: 'lesson-a' });
+  const otherLesson = classifyPublishEvent({
+    op: 'publishpresentation',
+    presentation: { id: 'ppt-current', title: '另一课堂同 ID' },
+  }, { lessonId: 'lesson-b' });
+
+  assert.equal(isCurrentPublishEvent(current, {
+    currentLessonId: 'lesson-a',
+    currentPresentationId: 'ppt-current',
+  }), true);
+  assert.equal(isCurrentPublishEvent(other, {
+    currentLessonId: 'lesson-a',
+    currentPresentationId: 'ppt-current',
+  }), false);
+  assert.equal(isCurrentPublishEvent(otherLesson, {
+    currentLessonId: 'lesson-a',
+    currentPresentationId: 'ppt-current',
+  }), false);
+});
+
+test('keeps identical publication IDs independent across lessons', async () => {
+  const { classifyPublishEvent } = await loadPublishEvents();
+  const first = classifyPublishEvent({
+    op: 'publishpresentation',
+    presentation: { id: 'same-id' },
+  }, { lessonId: 'lesson-a' });
+  const second = classifyPublishEvent({
+    op: 'publishpresentation',
+    presentation: { id: 'same-id' },
+  }, { lessonId: 'lesson-b' });
+
+  assert.notEqual(first.dedupeKey, second.dedupeKey);
+});

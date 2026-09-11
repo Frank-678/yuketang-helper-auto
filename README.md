@@ -1,12 +1,12 @@
 <p align="center">
-  <a href="https://github.com/ZaytsevZY/yuketang-helper-auto/pulls">
+  <a href="https://github.com/HITweihai/yuketang-helper-auto/pulls">
     <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome">
   </a>
-  <a href="https://github.com/ZaytsevZY/yuketang-helper-auto/blob/main/LICENSE">
+  <a href="https://github.com/HITweihai/yuketang-helper-auto/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="license"/>
   </a>
-  <a href="./release/ykt-helper-1215.user.js">
-    <img src="https://img.shields.io/badge/version-1.21.5-blue.svg" alt="版本">
+  <a href="./release/ykt-helper-1216.user.js">
+    <img src="https://img.shields.io/badge/version-1.21.6-blue.svg" alt="版本">
   </a>
   <a href="#">
     <img src="https://img.shields.io/badge/platform-Chrome%20%7C%20Edge-green.svg" alt="适配平台">
@@ -26,7 +26,7 @@
     </h3>
 </html>
 
-> 最后更新时间：2026.09.09
+> 最后更新时间：2026.09.11
 
 ## 项目说明
 
@@ -48,7 +48,7 @@
   - 使用edge，你需要打开**拓展-管理拓展-开发者模式**，再开启篡改猴插件中的**允许注入脚本**和**允许访问文件URL权限**
   - 使用chrome，你需要打开 **（右上角三点）-拓展程序-管理拓展程序-开发者模式**，再开启插件面板中的**允许运行用户脚本**和**允许访问文件网址**
 
-- 可直接[安装此 fork 的 1.21.5 发布脚本](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper-1215.user.js)。
+- 可直接[安装 1.21.6 发布脚本](https://raw.githubusercontent.com/HITweihai/yuketang-helper-auto/feat/recover-auto-answer-1215/release/ykt-helper-1216.user.js)。
 
 - 也可以[安装 GreasyFork 的稳定版本](https://update.greasyfork.org/scripts/531469/AI%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B.user.js)；它通常不是最新版本。
 
@@ -60,7 +60,7 @@
 
 - 或手动创建新脚本，将 `release/ykt-helper-<版本号>.user.js` 的内容复制到篡改猴的新建脚本中。
 
-- 当前构建版本为 `1.21.5`，支持：
+- 当前构建版本为 `1.21.6`，支持：
 
   - `148.0.7778.98-chrome`及以下的chrome
 
@@ -106,7 +106,11 @@
 
 - 题目操作不会在右下角重复显示：只有当前选中的题目页显示题干和“AI 强制作答/编辑补交”，其他题目从“题目列表”进入或直接使用列表中的 AI 强制作答、强制补交。
 
-- 修复不限时题目因空的 `limit` 被计算为 `0` 而立即过期的问题；不限时题目现在可继续自动作答。
+- 修复不限时题目因空的 `limit` 被计算为 `0` 而立即过期的问题；不限时题目现在可继续自动作答，活动题目列表显示为“不限时”。
+
+- 自动进入课堂会同步当前账号所有 `status=1` 的活跃课堂；课件发布提醒会区分课堂、课件和当前正在查看的课件，不会把当前课件的发布重复提醒。
+
+- 自动跳转会先等待 10 秒让用户选择其他课件或课堂；期间发生点击、触摸、滚轮、键盘或站内路由操作后，脚本会取消自动跳转并保留用户选择。
 
 - 若要查看这堂课的所有习题信息，可以点击工具栏的「查看课件和幻灯片」 :receipt: 图标。
 
@@ -145,6 +149,8 @@
 ![](./static/auto.png)
 
 - 可以在设置 :gear: 界面设置是否自动作答，以及自动作答的延迟时间
+- 可选允许截止时间之后使用补交接口强制作答；是否成功仍取决于雨课堂服务器权限。
+- 可配置多个时间点，在时间点前 1 分钟至后 10 分钟使用快速 AI Profile；首次提交后可以再使用准确 Profile 复核，发现答案不同则最多重新提交一次。
 - 自动作答支持所有题型，包括单选，多选，填空，简答，投票
   - 如果未打开问题列表，会默认解答最新的题目（可自动进行）（你可以在 :gear: 中调整）
   - 如果已打开问题列表并选择了某个问题，会解答选中的问题
@@ -222,6 +228,8 @@
 - 1.21.4: 修复不限时题目因空 `limit` 被判定为立即过期，恢复不限时题目的自动作答并在活动题目列表中显示“不限时”；新增可选的重复弹幕自动跟发（7 条窗口、3 条阈值、60 秒分轮、每轮最多 2 条）
 
 - 1.21.5: 新增按课程隔离的自动作答队列持久化；刷新后可恢复已排队或被中断的题目；新增题目页、题目列表和 AI 面板的 AI 强制作答及编辑答案提交；隐藏右下角重复的活动题目卡片，统一从当前题目页或题目列表进入操作；新增自动恢复、过期强制补交和未作答扫描三个独立开关，默认关闭；调整弹幕为“连续 7 条/30 秒”选择最高频文本（并列取最新）后自动跟发；修复历史时间线误触发新题提醒和自动作答；新增恢复状态、AI 执行器、答案编辑、弹幕与提醒边界测试
+
+- 1.21.6: 自动进入当前账号全部活跃课堂并按课堂隔离连接和提醒；发布提醒区分课堂、课件和当前查看内容；弹幕跟发增加实际出站发送确认；新增截止后自动强制补交、快速作答时间窗与快速/复核双 Profile；自动跳转等待 10 秒并尊重用户操作；同步更新 1.21.6 构建产物、教程、调试入口和回归测试
 
 - 1.21.3: 汇总 Profile Temperature、入口页与桌面专用 `/m/v2` 路由守卫、细分课堂提醒、发布事件去重与误报修复、课堂保持亮屏
 

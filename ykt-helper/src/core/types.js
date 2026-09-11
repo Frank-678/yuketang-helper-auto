@@ -12,6 +12,7 @@ export const PROBLEM_TYPE_MAP = {
 export const DEFAULT_CONFIG = {
   ...REMINDER_DEFAULTS,
   autoAnswer: false,
+  autoForceRetry: false,
   autoAnswerDelay: 3000,
   autoAnswerRandomDelay: 2000,
   // 刷新后恢复只针对刷新前已经出现并记录的题目，默认关闭以避免旧题误提交。
@@ -20,6 +21,11 @@ export const DEFAULT_CONFIG = {
   autoRecoverExpired: false,
   // 扫描所有已缓存但从未解锁的未答题，默认关闭。
   autoScanUnanswered: false,
+  answerPriorityWindows: [],
+  fastAnswerProfileId: '',
+  verifyAnswerProfileId: '',
+  answerVerification: false,
+  answerVerificationDelay: 0,
   autoFollowDanmu: false,
   keepScreenAwake: false,
   iftex: true,

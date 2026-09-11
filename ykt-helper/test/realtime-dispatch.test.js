@@ -70,3 +70,27 @@ test('routes newdanmu frames to the barrage handler', async () => {
     options: { notificationOnly: false, source: 'live', lessonId: 'lesson-9' },
   }]);
 });
+
+test('passes lesson context through publication dispatch', async () => {
+  const { dispatchRealtimeMessage } = await loadRealtimeDispatch();
+  const calls = [];
+
+  dispatchRealtimeMessage({
+    data: {
+      type: 'publishpresentation',
+      presentation: { id: 'ppt-7', title: '另一课堂课件' },
+    },
+  }, {
+    lessonId: 'lesson-7',
+    handlers: {
+      onPublishEvent(event, options) {
+        calls.push({ event, options });
+      },
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].event.lessonId, 'lesson-7');
+  assert.equal(calls[0].event.presentationId, 'ppt-7');
+  assert.deepEqual(calls[0].options, { notificationOnly: false, lessonId: 'lesson-7' });
+});

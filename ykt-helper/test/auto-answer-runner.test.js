@@ -122,3 +122,59 @@ test('keeps a failed request retryable and records the error', async () => {
   assert.match(status.lastError, /network down/);
   assert.equal(calls.status.at(-1).phase, 'failed');
 });
+
+test('passes the fast profile to the first AI request during a priority window', async () => {
+  const { createAutoAnswerRunner } = await loadRunner();
+  const { calls, dependencies } = createRunnerHarness({
+    getAnswerProfile: ({ role }) => ({ id: role === 'fast' ? 'fast-profile' : 'active-profile' }),
+    queryAIVision: async (...args) => {
+      calls.query.push({ image: args[0], prompt: args[1], options: args[3] });
+      return '答案: A';
+    },
+  });
+  const runner = createAutoAnswerRunner(dependencies);
+  const problem = { problemId: 'problem-fast', problemType: 1, body: '1+1=?' };
+  const status = {
+    slideId: 'slide-fast',
+    startTime: 1_000,
+    endTime: 5_000,
+    phase: 'queued',
+    answering: false,
+    done: false,
+  };
+
+  const result = await runner.run(problem, status, { force: true, lessonId: 'lesson-fast' });
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.query[0].options.profileId, 'fast-profile');
+  assert.equal(calls.query[0].options.problemType, 1);
+});
+
+test('submits one correction when verification returns a different parsed answer', async () => {
+  const { createAutoAnswerRunner } = await loadRunner();
+  const { calls, dependencies } = createRunnerHarness({
+    verifyAnswer: async input => {
+      calls.verification = input;
+      return { state: 'corrected', answer: ['B'], aiAnswer: '答案: B' };
+    },
+  });
+  const runner = createAutoAnswerRunner(dependencies);
+  const problem = { problemId: 'problem-verify', problemType: 1, body: '1+1=?' };
+  const status = {
+    slideId: 'slide-verify',
+    startTime: 1_000,
+    endTime: 5_000,
+    phase: 'queued',
+    answering: false,
+    done: false,
+  };
+
+  const result = await runner.run(problem, status, { force: true, lessonId: 'lesson-verify' });
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.submit.length, 2);
+  assert.deepEqual(calls.submit.map(call => call.result), [['A'], ['B']]);
+  assert.equal(calls.verification.firstRawAnswer, '答案: A');
+  assert.deepEqual(result.answer, ['B']);
+  assert.equal(result.aiAnswer, '答案: B');
+});

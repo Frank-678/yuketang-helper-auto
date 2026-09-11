@@ -7,6 +7,8 @@ const DEFAULTS = {
   maxSendsPerRound: 2,
 };
 
+export const DANMU_FOLLOW_DEFAULTS = DEFAULTS;
+
 function normalizeOp(message) {
   return String(message?.op || message?.type || '')
     .trim()
@@ -92,11 +94,14 @@ export function createDanmuRoundTracker(options = {}) {
  */
 export function createDanmuFollowTracker(options = {}) {
   const windowSize = Math.max(1, Math.floor(finitePositive(options.windowSize, DEFAULTS.windowSize)));
-  const burstWindowMs = finitePositive(options.burstWindowMs, DEFAULTS.burstWindowMs);
+  const burstWindowMs = finitePositive(
+    options.burstWindowMs ?? options.windowMs,
+    DEFAULTS.burstWindowMs,
+  );
   const roundGapMs = finitePositive(options.roundGapMs, DEFAULTS.roundGapMs);
   const maxSendsPerRound = Math.max(0, Math.floor(Number.isFinite(Number(options.maxSendsPerRound))
     ? Number(options.maxSendsPerRound)
-    : DEFAULTS.maxSendsPerRound));
+    : DANMU_FOLLOW_DEFAULTS.maxSendsPerRound));
 
   let messages = [];
   let lastAt = null;
@@ -128,7 +133,7 @@ export function createDanmuFollowTracker(options = {}) {
 
     const timestamp = Number(at);
     const now = Number.isFinite(timestamp) ? timestamp : Date.now();
-    if (lastAt !== null && now - lastAt >= roundGapMs) reset();
+    if (lastAt !== null && (now < lastAt || now - lastAt >= roundGapMs)) reset();
 
     messages.push({ text, at: now });
     if (messages.length > windowSize) messages = messages.slice(-windowSize);
@@ -233,7 +238,7 @@ export function createDanmuFollowController(options = {}) {
     return true;
   }
 
-  function handle(message, { notificationOnly = false } = {}) {
+  async function handle(message, { notificationOnly = false } = {}) {
     const parsed = extractDanmuMessage(message);
     if (!parsed) return { handled: false, triggered: false, reason: 'not-danmu' };
 
@@ -292,9 +297,25 @@ export function createDanmuFollowController(options = {}) {
     } catch (error) {
       sendResult = { sent: false, text: observation.text, reason: 'send-error', error };
     }
-    if (sendResult === true || sendResult?.sent === true) rememberOwn(observation.text, now);
 
-    return { handled: true, ...enriched, sendResult };
+    const finalize = resolved => {
+      if (
+        resolved === true
+        || (resolved?.sent === true && resolved?.verified !== false)
+      ) rememberOwn(observation.text, now);
+      return { handled: true, ...enriched, sendResult: resolved };
+    };
+
+    if (sendResult && typeof sendResult.then === 'function') {
+      return sendResult.then(finalize, error => finalize({
+        sent: false,
+        text: observation.text,
+        reason: 'send-error',
+        error,
+      }));
+    }
+
+    return finalize(sendResult);
   }
 
   return {

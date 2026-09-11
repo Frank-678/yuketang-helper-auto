@@ -22,6 +22,7 @@ export function createAutoAnswerRunner({
   typeMap = {},
   hasActiveProfile = () => false,
   getAIConfig = () => undefined,
+  getAnswerProfile = () => null,
   makeDefaultAnswer = () => null,
   captureSlideImage = async () => null,
   captureProblemForVision = async () => null,
@@ -34,6 +35,7 @@ export function createAutoAnswerRunner({
   notify,
   toast,
   showPopup,
+  verifyAnswer = null,
   now = () => Date.now(),
 } = {}) {
   async function run(problem, status, {
@@ -66,10 +68,18 @@ export function createAutoAnswerRunner({
     let aiContent = '';
     try {
       let parsed;
-      if (!hasActiveProfile(getAIConfig())) {
+      const aiConfig = getAIConfig();
+      const answerProfile = getAnswerProfile?.({
+        problem,
+        status,
+        role: 'fast',
+        now: currentTime,
+      }) || null;
+      let image = null;
+      let prompt = '';
+      if (!hasActiveProfile(aiConfig, answerProfile)) {
         parsed = makeDefaultAnswer(problem);
       } else {
-        let image = null;
         try {
           image = await captureSlideImage(status.slideId);
         } catch (error) {
@@ -81,8 +91,11 @@ export function createAutoAnswerRunner({
         if (!image) throw new Error('无法获取题目图像');
 
         const hasTextInfo = !!(problem.body && String(problem.body).trim());
-        const prompt = formatProblemForVision(problem, typeMap, hasTextInfo);
-        aiContent = await queryAIVision(image, prompt, getAIConfig());
+        prompt = formatProblemForVision(problem, typeMap, hasTextInfo);
+        aiContent = await queryAIVision(image, prompt, aiConfig, {
+          profileId: answerProfile?.id,
+          problemType: problem.problemType,
+        });
         parsed = parseAIAnswer(problem, aiContent);
         if (!parsed) throw new Error('无法解析 AI 返回的答案');
       }
@@ -98,18 +111,57 @@ export function createAutoAnswerRunner({
         submitOptions.waitMs = 0;
       }
 
-      const submission = await submitAnswer(problem, parsed, submitOptions);
+      let submission = await submitAnswer(problem, parsed, submitOptions);
+      let finalAnswer = parsed;
+      let finalAIContent = aiContent;
+      let verificationState = 'disabled';
+
+      if (typeof verifyAnswer === 'function' && aiContent) {
+        try {
+          const verification = await verifyAnswer({
+            problem,
+            status,
+            image,
+            prompt,
+            firstAnswer: parsed,
+            firstRawAnswer: aiContent,
+            forceRetry: shouldRetry,
+            now: currentTime,
+          });
+          verificationState = verification?.state || 'unavailable';
+          if (verificationState === 'corrected' && verification?.answer !== undefined) {
+            submission = await submitAnswer(problem, verification.answer, submitOptions);
+            finalAnswer = verification.answer;
+            finalAIContent = verification.aiAnswer ?? aiContent;
+          } else if (verification?.aiAnswer !== undefined) {
+            finalAIContent = verification.aiAnswer;
+          }
+        } catch (error) {
+          verificationState = 'unavailable';
+          console.warn('[雨课堂助手][WARN][AutoAnswer] 验证模型失败，保留首次提交:', error);
+        }
+      }
+
       status.done = true;
       status.answering = false;
       status.phase = 'done';
       status.autoAnswerTime = null;
       status.lastError = '';
       emitStatus(status, onStatusChange, problem);
-      await onAnswered?.(problem, parsed, status, submission);
-      notify?.('auto-answer-succeeded', problem, shouldRetry ? '答案已强制补交。' : undefined, { source, submission });
+      await onAnswered?.(problem, finalAnswer, status, submission);
+      const successDetail = verificationState === 'corrected'
+        ? '快速答案已提交，验证模型发现差异并完成修正。'
+        : (shouldRetry ? '答案已强制补交。' : undefined);
+      notify?.('auto-answer-succeeded', problem, successDetail, { source, submission, verificationState });
       toast?.(shouldRetry ? 'AI 作答完成并已补交' : 'AI 作答完成', 3000);
-      showPopup?.(problem, aiContent || '（本地默认答案）');
-      return { ok: true, answer: parsed, aiAnswer: aiContent, ...submission };
+      showPopup?.(problem, finalAIContent || '（本地默认答案）');
+      return {
+        ok: true,
+        answer: finalAnswer,
+        aiAnswer: finalAIContent,
+        verificationState,
+        ...submission,
+      };
     } catch (error) {
       status.answering = false;
       status.phase = 'failed';
