@@ -1,8 +1,8 @@
 import { sendDanmuText } from './danmu-sender.js';
 
-const DEFAULTS = {
+export const DANMU_FOLLOW_DEFAULTS = {
   windowSize: 7,
-  threshold: 3,
+  windowMs: 30_000,
   roundGapMs: 60_000,
   maxSendsPerRound: 2,
 };
@@ -50,12 +50,12 @@ export function extractDanmuMessage(message) {
  * messages and emits at most one trigger per text and maxSendsPerRound total.
  */
 export function createDanmuFollowTracker(options = {}) {
-  const windowSize = Math.max(1, Math.floor(finitePositive(options.windowSize, DEFAULTS.windowSize)));
-  const threshold = Math.max(1, Math.floor(finitePositive(options.threshold, DEFAULTS.threshold)));
-  const roundGapMs = finitePositive(options.roundGapMs, DEFAULTS.roundGapMs);
+  const windowSize = Math.max(1, Math.floor(finitePositive(options.windowSize, DANMU_FOLLOW_DEFAULTS.windowSize)));
+  const windowMs = finitePositive(options.windowMs, DANMU_FOLLOW_DEFAULTS.windowMs);
+  const roundGapMs = finitePositive(options.roundGapMs, DANMU_FOLLOW_DEFAULTS.roundGapMs);
   const maxSendsPerRound = Math.max(0, Math.floor(Number.isFinite(Number(options.maxSendsPerRound))
     ? Number(options.maxSendsPerRound)
-    : DEFAULTS.maxSendsPerRound));
+    : DANMU_FOLLOW_DEFAULTS.maxSendsPerRound));
 
   let messages = [];
   let lastAt = null;
@@ -87,20 +87,37 @@ export function createDanmuFollowTracker(options = {}) {
 
     const timestamp = Number(at);
     const now = Number.isFinite(timestamp) ? timestamp : Date.now();
-    if (lastAt !== null && now - lastAt >= roundGapMs) reset();
+    if (lastAt !== null && (now < lastAt || now - lastAt >= roundGapMs)) reset();
 
     messages.push({ text, at: now });
     if (messages.length > windowSize) messages = messages.slice(-windowSize);
     lastAt = now;
 
-    const count = messages.reduce((total, item) => total + (item.text === text ? 1 : 0), 0);
-    if (count < threshold) return result(false, text, count, 'threshold');
-    if (followedTexts.has(text)) return result(false, text, count, 'already-followed');
-    if (sentCount >= maxSendsPerRound) return result(false, text, count, 'round-limit');
+    if (messages.length < windowSize || now - messages[0].at > windowMs) {
+      const count = messages.reduce((total, item) => total + (item.text === text ? 1 : 0), 0);
+      return result(false, text, count, 'window');
+    }
 
-    followedTexts.add(text);
+    const counts = new Map();
+    const lastIndexes = new Map();
+    messages.forEach((item, index) => {
+      counts.set(item.text, (counts.get(item.text) || 0) + 1);
+      lastIndexes.set(item.text, index);
+    });
+    const candidates = [...counts.entries()]
+      .sort((a, b) => {
+        const countDifference = b[1] - a[1];
+        if (countDifference !== 0) return countDifference;
+        return lastIndexes.get(b[0]) - lastIndexes.get(a[0]);
+      });
+    const [selectedText, count] = candidates[0];
+    if (sentCount >= maxSendsPerRound) return result(false, selectedText, count, 'round-limit');
+    if (followedTexts.has(selectedText)) {
+      return result(false, selectedText, count, 'already-followed');
+    }
+    followedTexts.add(selectedText);
     sentCount += 1;
-    return result(true, text, count);
+    return result(true, selectedText, count);
   }
 
   return {
@@ -165,7 +182,7 @@ export function createDanmuFollowController(options = {}) {
     return true;
   }
 
-  function handle(message, { notificationOnly = false } = {}) {
+  async function handle(message, { notificationOnly = false } = {}) {
     const parsed = extractDanmuMessage(message);
     if (!parsed) return { handled: false, triggered: false, reason: 'not-danmu' };
 
@@ -194,11 +211,14 @@ export function createDanmuFollowController(options = {}) {
 
     let sendResult;
     try {
-      sendResult = send(parsed.text);
+      sendResult = await Promise.resolve(send(observation.text));
     } catch (error) {
-      sendResult = { sent: false, text: parsed.text, reason: 'send-error', error };
+      sendResult = { sent: false, text: observation.text, reason: 'send-error', error };
     }
-    if (sendResult === true || sendResult?.sent === true) rememberOwn(parsed.text, now);
+    if (
+      sendResult === true
+      || (sendResult?.sent === true && sendResult?.verified !== false)
+    ) rememberOwn(observation.text, now);
 
     return { handled: true, ...observation, sendResult };
   }

@@ -3,6 +3,7 @@ import { gm } from '../core/env.js';
 import { actions } from '../state/actions.js';
 import { repo } from '../state/repo.js';
 import { dispatchRealtimeMessage } from '../core/realtime-dispatch.js';
+import { confirmDanmuSend } from '../core/danmu-sender.js';
 
 function lessonIdFromPath(pathname = '') {
   const match = String(pathname).match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
@@ -74,9 +75,11 @@ MyWebSocket.addHandler((ws, url) => {
 
     // 发送侧拦截（可用于调试）
     ws.intercept((message) => {
+      const confirmed = confirmDanmuSend(message);
       console.log('[雨课堂助手][INFO] WebSocket发送:', {
         op: message?.op || message?.type || null,
         lessonId: getSocketLessonId(ws),
+        danmuConfirmed: confirmed > 0,
       });
     });
 
@@ -102,7 +105,7 @@ MyWebSocket.addHandler((ws, url) => {
             },
             onDanmu(danmu, options) {
               console.log('[雨课堂助手][INFO] 收到弹幕:', danmu?.danmu);
-              actions.onDanmu(danmu, options);
+              void actions.onDanmu(danmu, options);
             },
             onPublishEvent(event, options) {
               console.log('[雨课堂助手][INFO] 收到课堂发布:', event);

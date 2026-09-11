@@ -400,7 +400,7 @@ export const actions = {
     return notified;
   },
 
-  onDanmu(data, options = {}) {
+  async onDanmu(data, options = {}) {
     const pageLessonId = currentPageLessonId();
     const messageLessonId = options.lessonId ? String(options.lessonId) : null;
     if (messageLessonId && pageLessonId && messageLessonId !== pageLessonId) {
@@ -411,7 +411,7 @@ export const actions = {
     }
 
     const lessonId = messageLessonId || pageLessonId || repo.currentLessonId || '__current__';
-    const result = getDanmuFollowController(lessonId).handle(data, options);
+    const result = await getDanmuFollowController(lessonId).handle(data, options);
     if (result.triggered) {
       if (result.sendResult?.sent) {
         console.log('[雨课堂助手][INFO][DanmuFollow] 已自动跟发:', result.text, {

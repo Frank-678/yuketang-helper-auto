@@ -7,7 +7,7 @@ function tracker(options = {}) {
   return loadDanmuFollow().then(({ createDanmuFollowTracker }) => (
     createDanmuFollowTracker({
       windowSize: 7,
-      threshold: 3,
+      windowMs: 30_000,
       roundGapMs: 60_000,
       maxSendsPerRound: 2,
       ...options,
@@ -15,66 +15,61 @@ function tracker(options = {}) {
   ));
 }
 
-test('triggers when a text appears three times in the current seven-message window', async () => {
+test('follows the most frequent text after seven messages inside thirty seconds', async () => {
   const follow = await tracker();
+  const texts = ['甲', '乙', '甲', '丙', '甲', '丁', '乙'];
+  texts.slice(0, -1).forEach((text, index) => follow.observe(text, index * 1000));
 
-  assert.equal(follow.observe('同学们好', 0).triggered, false);
-  assert.equal(follow.observe('其他内容', 1).triggered, false);
-  assert.equal(follow.observe('同学们好', 2).triggered, false);
-
-  const result = follow.observe('同学们好', 3);
+  const result = follow.observe(texts.at(-1), 6000);
 
   assert.deepEqual(result, {
     triggered: true,
-    text: '同学们好',
+    text: '甲',
     count: 3,
     sentCount: 1,
   });
 });
 
-test('uses a sliding window and drops messages older than the latest seven', async () => {
+test('uses the most recent text to break a frequency tie', async () => {
   const follow = await tracker();
+  const texts = ['甲', '乙', '甲', '乙', '丙', '丁', '乙'];
+  const result = texts.reduce((last, text, index) => follow.observe(text, index * 1000), null);
 
-  follow.observe('重复', 0);
-  follow.observe('重复', 1);
-  follow.observe('甲', 2);
-  follow.observe('乙', 3);
-  follow.observe('丙', 4);
-  follow.observe('丁', 5);
-  follow.observe('戊', 6);
-
-  const result = follow.observe('己', 7);
-
-  assert.equal(result.triggered, false);
-  assert.equal(result.count, 1);
+  assert.equal(result.triggered, true);
+  assert.equal(result.text, '乙');
+  assert.equal(result.count, 3);
 });
 
-test('starts a new round when the gap is at least one minute', async () => {
+test('does not trigger when the seven-message window exceeds thirty seconds', async () => {
+  const follow = await tracker();
+  const texts = ['甲', '乙', '甲', '丙', '甲', '丁', '乙'];
+  const result = texts.reduce((last, text, index) => follow.observe(text, index * 5001), null);
+
+  assert.equal(result.triggered, false);
+  assert.equal(result.reason, 'window');
+});
+
+test('starts a new round after a sixty-second gap', async () => {
   const follow = await tracker();
 
   follow.observe('同一文本', 0);
-  follow.observe('同一文本', 1);
-  assert.equal(follow.observe('同一文本', 60_001).triggered, false);
-
-  const result = follow.observe('同一文本', 60_002);
+  follow.observe('同一文本', 1000);
+  const result = follow.observe('同一文本', 61_001);
 
   assert.equal(result.triggered, false);
-  assert.equal(result.count, 2);
+  assert.equal(result.reason, 'window');
+  assert.equal(result.count, 1);
 });
 
 test('allows only two automatic follows in one round', async () => {
   const follow = await tracker();
+  const first = ['甲', '甲', '乙', '丙', '丁', '戊', '己'];
 
-  assert.equal(follow.observe('第一组', 0).triggered, false);
-  assert.equal(follow.observe('第一组', 1).triggered, false);
-  assert.equal(follow.observe('第一组', 2).triggered, true);
-  assert.equal(follow.observe('第二组', 3).triggered, false);
-  assert.equal(follow.observe('第二组', 4).triggered, false);
-  assert.equal(follow.observe('第二组', 5).triggered, true);
-  assert.equal(follow.observe('第三组', 6).triggered, false);
-  assert.equal(follow.observe('第三组', 7).triggered, false);
+  first.slice(0, -1).forEach((text, index) => follow.observe(text, index));
+  assert.equal(follow.observe(first.at(-1), 6).triggered, true);
+  assert.equal(follow.observe('庚', 10).triggered, true);
 
-  const result = follow.observe('第三组', 8);
+  const result = follow.observe('辛', 11);
 
   assert.equal(result.triggered, false);
   assert.equal(result.reason, 'round-limit');
@@ -82,36 +77,19 @@ test('allows only two automatic follows in one round', async () => {
 
 test('does not follow the same text twice in one round', async () => {
   const follow = await tracker();
+  const texts = ['重复', '重复', '甲', '乙', '丙', '丁', '戊'];
+  texts.slice(0, -1).forEach((text, index) => follow.observe(text, index));
+  assert.equal(follow.observe(texts.at(-1), 6).triggered, true);
 
-  follow.observe('重复', 0);
-  follow.observe('重复', 1);
-  assert.equal(follow.observe('重复', 2).triggered, true);
-
-  const result = follow.observe('重复', 3);
+  const result = follow.observe('重复', 7);
 
   assert.equal(result.triggered, false);
   assert.equal(result.reason, 'already-followed');
 });
 
-test('allows the same text again after the round resets', async () => {
-  const follow = await tracker();
-
-  follow.observe('重复', 0);
-  follow.observe('重复', 1);
-  assert.equal(follow.observe('重复', 2).triggered, true);
-
-  follow.observe('新一轮', 62_000);
-  follow.observe('重复', 62_001);
-  follow.observe('重复', 62_002);
-  const result = follow.observe('重复', 62_003);
-
-  assert.equal(result.triggered, true);
-  assert.equal(result.sentCount, 1);
-});
-
 test('keeps exact text matching and ignores empty danmu messages', async () => {
   const { createDanmuFollowTracker, extractDanmuMessage } = await loadDanmuFollow();
-  const follow = createDanmuFollowTracker({ windowSize: 7, threshold: 3 });
+  const follow = createDanmuFollowTracker({ windowSize: 7, windowMs: 30_000 });
 
   assert.equal(follow.observe(' same', 0).triggered, false);
   assert.equal(follow.observe('same', 1).triggered, false);
@@ -133,8 +111,8 @@ test('keeps exact text matching and ignores empty danmu messages', async () => {
   assert.equal(extractDanmuMessage({ op: 'chatmessage', danmu: 'same' }), null);
 });
 
-test('sends a follow-up through the classroom input and send button', async () => {
-  const { sendDanmuText } = await import('../src/core/danmu-sender.js');
+test('reports a barrage as sent only after an outbound frame confirms it', async () => {
+  const { sendDanmuText, confirmDanmuSend } = await import('../src/core/danmu-sender.js');
   const events = [];
   const input = {
     value: '',
@@ -157,63 +135,82 @@ test('sends a follow-up through the classroom input and send button', async () =
     },
   };
 
-  const result = sendDanmuText('跟上这条', { root });
+  const pending = sendDanmuText('跟上这条', { root, awaitConfirmationMs: 50 });
+  assert.equal(confirmDanmuSend({ op: 'senddanmu', danmu: '跟上这条' }), 1);
 
-  assert.deepEqual(result, { sent: true, text: '跟上这条' });
-  assert.equal(input.value, '跟上这条');
+  assert.deepEqual(await pending, {
+    sent: true,
+    verified: true,
+    text: '跟上这条',
+  });
   assert.deepEqual(events, ['input', 'change', 'click']);
 });
 
-test('reports when the classroom send controls are unavailable', async () => {
+test('reports an unconfirmed DOM click as a failed barrage send', async () => {
   const { sendDanmuText } = await import('../src/core/danmu-sender.js');
-  const result = sendDanmuText('跟上这条', {
-    root: { querySelector: () => null },
+  const result = await sendDanmuText('没有出站帧', {
+    awaitConfirmationMs: 1,
+    root: {
+      querySelector(selector) {
+        if (selector === '.send__input') return { value: '', dispatchEvent() {} };
+        if (selector === '.send__btn') return { disabled: false, click() {} };
+        return null;
+      },
+    },
   });
 
-  assert.deepEqual(result, { sent: false, text: '跟上这条', reason: 'controls-unavailable' });
+  assert.deepEqual(result, {
+    sent: false,
+    verified: false,
+    text: '没有出站帧',
+    reason: 'send-unconfirmed',
+  });
 });
 
-test('controller follows a threshold event and ignores its own echoed message', async () => {
-  const { createDanmuFollowController } = await import('../src/core/danmu-follow.js');
+test('controller follows a selected text and ignores its own echoed message', async () => {
+  const { createDanmuFollowController } = await loadDanmuFollow();
   const sent = [];
   let now = 0;
   const controller = createDanmuFollowController({
     now: () => now,
     send: text => {
       sent.push(text);
-      return { sent: true, text };
+      return { sent: true, verified: true, text };
     },
   });
 
-  controller.handle({ op: 'newdanmu', danmu: '跟上这条', userid: 7 });
-  now = 1;
-  controller.handle({ op: 'newdanmu', danmu: '跟上这条', userid: 8 });
-  now = 2;
-  const triggered = controller.handle({ op: 'newdanmu', danmu: '跟上这条', userid: 9 });
+  const messages = ['甲', '跟上这条', '乙', '跟上这条', '丙', '跟上这条'];
+  for (const [index, text] of messages.entries()) {
+    now = index;
+    await controller.handle({ op: 'newdanmu', danmu: text, userid: index + 1 });
+  }
+  now = 6;
+  const triggered = await controller.handle({ op: 'newdanmu', danmu: '丁', userid: 9 });
 
   assert.equal(triggered.triggered, true);
-  assert.deepEqual(triggered.sendResult, { sent: true, text: '跟上这条' });
+  assert.equal(triggered.text, '跟上这条');
+  assert.equal(triggered.sendResult.verified, true);
   assert.deepEqual(sent, ['跟上这条']);
 
-  now = 3;
-  const echo = controller.handle({ op: 'newdanmu', danmu: '跟上这条' });
+  now = 7;
+  const echo = await controller.handle({ op: 'newdanmu', danmu: '跟上这条' });
   assert.equal(echo.reason, 'own-echo');
   assert.deepEqual(sent, ['跟上这条']);
 });
 
 test('controller does not track or send while disabled', async () => {
-  const { createDanmuFollowController } = await import('../src/core/danmu-follow.js');
+  const { createDanmuFollowController } = await loadDanmuFollow();
   const sent = [];
   const controller = createDanmuFollowController({
     enabled: () => false,
     send: text => {
       sent.push(text);
-      return { sent: true, text };
+      return { sent: true, verified: true, text };
     },
   });
 
-  for (let i = 0; i < 3; i += 1) {
-    const result = controller.handle({ op: 'newdanmu', danmu: '不会跟发', userid: i });
+  for (let i = 0; i < 8; i += 1) {
+    const result = await controller.handle({ op: 'newdanmu', danmu: '不会跟发', userid: i });
     assert.equal(result.reason, 'disabled');
   }
 
