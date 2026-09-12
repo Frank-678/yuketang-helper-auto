@@ -5,7 +5,7 @@ export const repo = {
   presentations: new Map(), // id -> presentation
   slides: new Map(),        // slideId -> slide
   problems: new Map(),      // problemId -> problem
-  problemStatus: new Map(), // problemId -> {presentationId, slideId, startTime, endTime, done, autoAnswerTime, answering}
+  problemStatus: new Map(), // problemId -> {presentationId, slideId, startTime, endTime, phase, done, autoAnswerTime, answering, attempts, lastError}
   encounteredProblems: [],  // [{problemId, ...ref}]
 
   currentPresentationId: null,
@@ -47,6 +47,7 @@ export const repo = {
   listeningLessons: new Set(),      // lessonId 的集合，表示已经建立WS监听
   lessonTokens: new Map(),          // lessonId -> lessonToken（/lesson/checkin 返回）
   lessonSockets: new Map(),         // lessonId -> WebSocket 实例
+  activeLessons: new Map(),         // lessonId -> 最近一次 on-lesson API 记录
   autoJoinRunning: false,           // 轮询开关
   autoJoinedLessons: new Set(),     // 被“自动进入”的课堂集合（仅标记自动进入建立的连接）
   forceAutoAnswerLessons: new Set(),// 若需要，可以对某些课强制视为“自动答题开启”
@@ -58,17 +59,46 @@ export const repo = {
     const stored = storage.getMap(key);
     for (const [id, data] of stored.entries()) {
       this.setPresentation(id, data);
+      const presentation = this.presentations.get(id);
+      for (const slide of presentation?.slides || []) {
+        this.upsertSlide(slide);
+        if (slide?.problem) {
+          this.upsertProblem(slide.problem);
+          this.pushEncounteredProblem(slide.problem, slide, id);
+        }
+      }
     }
   },
 
   markLessonConnected(lessonId, ws, token) {
-    if (token) this.lessonTokens.set(lessonId, token);
-    if (ws) this.lessonSockets.set(lessonId, ws);
-    this.listeningLessons.add(lessonId);
+    const key = String(lessonId || '').trim();
+    if (!key) return;
+    if (token) this.lessonTokens.set(key, token);
+    if (ws) this.lessonSockets.set(key, ws);
+    this.listeningLessons.add(key);
   },
 
   isLessonConnected(lessonId) {
-    return this.listeningLessons.has(lessonId) && this.lessonSockets.get(lessonId);
+    const socket = this.lessonSockets.get(String(lessonId));
+    if (!this.listeningLessons.has(String(lessonId)) || !socket) return false;
+    if (socket.readyState !== undefined && typeof WebSocket !== 'undefined') {
+      if (socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
+        return false;
+      }
+    }
+    return socket;
+  },
+
+  markLessonDisconnected(lessonId, reason = 'closed') {
+    const key = String(lessonId || '').trim();
+    if (!key) return null;
+    const socket = this.lessonSockets.get(key) || null;
+    this.lessonSockets.delete(key);
+    this.lessonTokens.delete(key);
+    this.listeningLessons.delete(key);
+    this.autoJoinedLessons.delete(key);
+    this.forceAutoAnswerLessons.delete(key);
+    return { lessonId: key, reason, socket };
   },
 
   markLessonAutoJoined(lessonId, enabled = true) {

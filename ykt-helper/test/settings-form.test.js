@@ -74,6 +74,8 @@ test('syncs every reminder checkbox from the current configuration when a panel 
   const fields = Object.fromEntries([
     'notifyProblems',
     'notifyProblemStarts',
+    'notifyDanmuRoundStarts',
+    'notifyDanmuFollowTriggers',
     'notifyAssessmentPublishes',
     'notifyCoursewarePublishes',
     'notifyOtherPublishes',
@@ -90,6 +92,8 @@ test('syncs every reminder checkbox from the current configuration when a panel 
   syncReminderForm(fields, {
     notifyProblems: false,
     notifyProblemStarts: false,
+    notifyDanmuRoundStarts: true,
+    notifyDanmuFollowTriggers: false,
     notifyAssessmentPublishes: true,
     notifyCoursewarePublishes: false,
     notifyOtherPublishes: true,
@@ -106,6 +110,8 @@ test('syncs every reminder checkbox from the current configuration when a panel 
   assert.deepEqual(Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, field.checked])), {
     notifyProblems: false,
     notifyProblemStarts: false,
+    notifyDanmuRoundStarts: true,
+    notifyDanmuFollowTriggers: false,
     notifyAssessmentPublishes: true,
     notifyCoursewarePublishes: false,
     notifyOtherPublishes: true,

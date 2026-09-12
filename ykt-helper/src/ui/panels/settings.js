@@ -43,6 +43,22 @@ function getActiveProfile(configAI) {
   return list.find(p => p.id === id) || list[0];
 }
 
+function parsePriorityTimes(value) {
+  const raw = String(value || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+  if (!raw.length) return [];
+
+  const windows = [];
+  for (const time of raw) {
+    const match = time.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return null;
+    windows.push({ at: `${String(Number(match[1])).padStart(2, '0')}:${match[2]}` });
+  }
+  return windows;
+}
+
 // ------------------------------
 
 export function mountSettingsPanel() {
@@ -79,13 +95,24 @@ export function mountSettingsPanel() {
   const $autoJoin = root.querySelector('#ykt-input-auto-join');
   const $autoJoinAutoAnswer = root.querySelector('#ykt-input-auto-join-auto-answer');
   const $autoAnalyze = root.querySelector('#ykt-input-ai-auto-analyze');
+  const $autoRecoverUnanswered = root.querySelector('#ykt-input-auto-recover-unanswered');
+  const $autoRecoverExpired = root.querySelector('#ykt-input-auto-recover-expired');
+  const $autoScanUnanswered = root.querySelector('#ykt-input-auto-scan-unanswered');
+  const $autoForceRetry = root.querySelector('#ykt-input-auto-force-retry');
   const $delay = root.querySelector('#ykt-input-answer-delay');
   const $rand = root.querySelector('#ykt-input-random-delay');
+  const $answerPriorityTimes = root.querySelector('#ykt-input-answer-priority-times');
+  const $fastAnswerProfile = root.querySelector('#ykt-ai-fast-profile');
+  const $answerVerification = root.querySelector('#ykt-input-answer-verification');
+  const $verifyAnswerProfile = root.querySelector('#ykt-ai-verify-profile');
+  const $verificationDelay = root.querySelector('#ykt-input-verification-delay');
   const $priority = root.querySelector('#ykt-ai-pick-main-first');
   const $notifyDur = root.querySelector('#ykt-input-notify-duration');
   const $notifyVol = root.querySelector('#ykt-input-notify-volume');
   const $notifyAll = root.querySelector('#ykt-input-notify-all');
   const $notifyProblemStart = root.querySelector('#ykt-input-notify-problem-start');
+  const $notifyDanmuRoundStart = root.querySelector('#ykt-input-notify-danmu-round-start');
+  const $notifyDanmuFollowTrigger = root.querySelector('#ykt-input-notify-danmu-follow-trigger');
   const $notifyAssessment = root.querySelector('#ykt-input-notify-assessment-publish');
   const $notifyCourseware = root.querySelector('#ykt-input-notify-courseware-publish');
   const $notifyOther = root.querySelector('#ykt-input-notify-other-publish');
@@ -110,6 +137,8 @@ export function mountSettingsPanel() {
   const reminderFields = {
     notifyProblems: $notifyAll,
     notifyProblemStarts: $notifyProblemStart,
+    notifyDanmuRoundStarts: $notifyDanmuRoundStart,
+    notifyDanmuFollowTriggers: $notifyDanmuFollowTrigger,
     notifyAssessmentPublishes: $notifyAssessment,
     notifyCoursewarePublishes: $notifyCourseware,
     notifyOtherPublishes: $notifyOther,
@@ -136,6 +165,30 @@ export function mountSettingsPanel() {
     });
   }
 
+  function refreshAnswerProfileSelects() {
+    const ai = ui.config.ai;
+    const configs = [
+      [$fastAnswerProfile, '', '不使用快速模型', ui.config.fastAnswerProfileId],
+      [$verifyAnswerProfile, '', '不使用复核模型', ui.config.verifyAnswerProfileId],
+    ];
+
+    for (const [select, emptyValue, emptyLabel, selectedId] of configs) {
+      if (!select) continue;
+      select.innerHTML = '';
+      const empty = document.createElement('option');
+      empty.value = emptyValue;
+      empty.textContent = emptyLabel;
+      select.appendChild(empty);
+      ai.profiles.forEach(profile => {
+        const option = document.createElement('option');
+        option.value = profile.id;
+        option.textContent = profile.name || profile.id;
+        select.appendChild(option);
+      });
+      select.value = selectedId || '';
+    }
+  }
+
   function loadProfileToForm(profileId) {
     const p = ui.config.ai.profiles.find(x => x.id === profileId);
     if (!p) return;
@@ -157,6 +210,7 @@ export function mountSettingsPanel() {
 
   // 初始化 Profile 下拉框
   refreshProfileSelect();
+  refreshAnswerProfileSelects();
   loadProfileToForm(ui.config.ai.activeProfileId);
 
   // 切换 profile
@@ -180,6 +234,7 @@ export function mountSettingsPanel() {
     ui.config.ai.activeProfileId = id;
 
     refreshProfileSelect();
+    refreshAnswerProfileSelects();
     loadProfileToForm(id);
   });
 
@@ -195,21 +250,37 @@ export function mountSettingsPanel() {
     ai.activeProfileId = ai.profiles[0].id;
 
     refreshProfileSelect();
+    refreshAnswerProfileSelects();
     loadProfileToForm(ai.activeProfileId);
   });
 
   function syncFormFromConfig() {
     ensureAIProfiles(ui.config.ai || (ui.config.ai = {}));
     refreshProfileSelect();
+    refreshAnswerProfileSelects();
     loadProfileToForm(ui.config.ai.activeProfileId);
 
     $autoJoin.checked = !!ui.config.autoJoinEnabled;
     $autoJoinAutoAnswer.checked = !!ui.config.autoAnswerOnAutoJoin;
     $auto.checked = !!ui.config.autoAnswer;
+    $autoForceRetry.checked = !!ui.config.autoForceRetry;
     $autoAnalyze.checked = !!ui.config.aiAutoAnalyze;
+    $autoRecoverUnanswered.checked = !!ui.config.autoRecoverUnanswered;
+    $autoRecoverExpired.checked = !!ui.config.autoRecoverExpired;
+    $autoScanUnanswered.checked = !!ui.config.autoScanUnanswered;
     $iftex.checked = !!ui.config.iftex;
     $delay.value = Math.floor((ui.config.autoAnswerDelay || 3000) / 1000);
     $rand.value = Math.floor((ui.config.autoAnswerRandomDelay || 1500) / 1000);
+    $answerPriorityTimes.value = (Array.isArray(ui.config.answerPriorityWindows)
+      ? ui.config.answerPriorityWindows
+      : [])
+      .map(item => typeof item === 'string' ? item : (item?.at || item?.time || ''))
+      .filter(Boolean)
+      .join(', ');
+    $fastAnswerProfile.value = ui.config.fastAnswerProfileId || '';
+    $answerVerification.checked = !!ui.config.answerVerification;
+    $verifyAnswerProfile.value = ui.config.verifyAnswerProfileId || '';
+    $verificationDelay.value = Math.floor((ui.config.answerVerificationDelay || 0) / 1000);
     $priority.checked = ui.config.aiSlidePickPriority !== false;
     $notifyDur.value = Math.floor((ui.config.notifyPopupDuration || 5000) / 1000);
     $notifyVol.value = Math.round(100 * (ui.config.notifyVolume ?? 0.6));
@@ -233,6 +304,12 @@ export function mountSettingsPanel() {
     const p = ai.profiles.find(x => x.id === pid);
     if (!p) {
       ui.toast('当前 AI 配置不存在，请重新选择后保存', 3000);
+      return;
+    }
+
+    const priorityWindows = parsePriorityTimes($answerPriorityTimes.value);
+    if (priorityWindows === null) {
+      ui.toast('时间点格式应为 HH:mm，例如 10:00, 14:30', 3000);
       return;
     }
 
@@ -262,9 +339,19 @@ export function mountSettingsPanel() {
     ui.config.autoJoinEnabled = !!$autoJoin.checked;
     ui.config.autoAnswerOnAutoJoin = !!$autoJoinAutoAnswer.checked;
     ui.config.autoAnswer = !!$auto.checked;
+    ui.config.autoForceRetry = !!$autoForceRetry.checked;
     ui.config.aiAutoAnalyze = !!$autoAnalyze.checked;
+    ui.config.autoRecoverUnanswered = !!$autoRecoverUnanswered.checked;
+    ui.config.autoRecoverExpired = !!$autoRecoverExpired.checked;
+    ui.config.autoScanUnanswered = !!$autoScanUnanswered.checked;
     ui.config.autoAnswerDelay = Math.max(1000, (+$delay.value || 0) * 1000);
     ui.config.autoAnswerRandomDelay = Math.max(0, (+$rand.value || 0) * 1000);
+    ui.config.answerPriorityWindows = priorityWindows;
+    ui.config.fastAnswerProfileId = $fastAnswerProfile.value || '';
+    ui.config.answerVerification = !!$answerVerification.checked;
+    ui.config.verifyAnswerProfileId = $verifyAnswerProfile.value || '';
+    ui.config.answerVerificationDelay = Math.max(0, Math.min(60, (+$verificationDelay.value || 0))) * 1000;
+    refreshAnswerProfileSelects();
     ui.config.iftex = !!$iftex.checked;
     ui.config.aiSlidePickPriority = !!$priority.checked;
     ui.config.notifyPopupDuration = Math.max(2000, (+$notifyDur.value || 0) * 1000);
@@ -301,6 +388,9 @@ export function mountSettingsPanel() {
 
     ui.config.autoJoinEnabled = false;
     ui.config.autoAnswerOnAutoJoin = true;
+    ui.config.autoRecoverUnanswered = false;
+    ui.config.autoRecoverExpired = false;
+    ui.config.autoScanUnanswered = false;
     syncFormFromConfig();
 
     storage.set('kimiApiKey', '');

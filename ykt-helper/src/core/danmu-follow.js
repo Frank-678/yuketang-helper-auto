@@ -2,10 +2,12 @@ import { sendDanmuText } from './danmu-sender.js';
 
 const DEFAULTS = {
   windowSize: 7,
-  threshold: 3,
+  burstWindowMs: 30_000,
   roundGapMs: 60_000,
   maxSendsPerRound: 2,
 };
+
+export const DANMU_FOLLOW_DEFAULTS = DEFAULTS;
 
 function normalizeOp(message) {
   return String(message?.op || message?.type || '')
@@ -44,18 +46,62 @@ export function extractDanmuMessage(message) {
 }
 
 /**
+ * Tracks classroom barrage round boundaries without applying follow rules.
+ * The first observed message starts round 1 silently; a later message starts
+ * a new round when the adjacent gap reaches the configured roundGapMs.
+ */
+export function createDanmuRoundTracker(options = {}) {
+  const roundGapMs = finitePositive(options.roundGapMs, DEFAULTS.roundGapMs);
+  let lastAt = null;
+  let roundNumber = 0;
+
+  function reset() {
+    lastAt = null;
+    roundNumber = 0;
+  }
+
+  function observe(at = Date.now()) {
+    const timestamp = Number(at);
+    const now = Number.isFinite(timestamp) ? timestamp : Date.now();
+    const roundStarted = lastAt !== null && now - lastAt >= roundGapMs;
+
+    if (lastAt === null || roundStarted) roundNumber += 1;
+    lastAt = now;
+
+    return {
+      roundStarted,
+      roundNumber,
+      at: now,
+    };
+  }
+
+  return {
+    observe,
+    reset,
+    getSnapshot() {
+      return { lastAt, roundNumber };
+    },
+  };
+}
+
+/**
  * Tracks one classroom's barrage stream.
  * A round continues while each adjacent non-empty message is less than the
- * configured gap apart.  The detector only remembers the latest windowSize
- * messages and emits at most one trigger per text and maxSendsPerRound total.
+ * configured gap apart.  Once windowSize consecutive messages are available,
+ * they must fit inside burstWindowMs; the most frequent exact text wins, with
+ * the newest text breaking ties.  Each completed burst is consumed so one
+ * message cannot trigger twice.
  */
 export function createDanmuFollowTracker(options = {}) {
   const windowSize = Math.max(1, Math.floor(finitePositive(options.windowSize, DEFAULTS.windowSize)));
-  const threshold = Math.max(1, Math.floor(finitePositive(options.threshold, DEFAULTS.threshold)));
+  const burstWindowMs = finitePositive(
+    options.burstWindowMs ?? options.windowMs,
+    DEFAULTS.burstWindowMs,
+  );
   const roundGapMs = finitePositive(options.roundGapMs, DEFAULTS.roundGapMs);
   const maxSendsPerRound = Math.max(0, Math.floor(Number.isFinite(Number(options.maxSendsPerRound))
     ? Number(options.maxSendsPerRound)
-    : DEFAULTS.maxSendsPerRound));
+    : DANMU_FOLLOW_DEFAULTS.maxSendsPerRound));
 
   let messages = [];
   let lastAt = null;
@@ -87,20 +133,44 @@ export function createDanmuFollowTracker(options = {}) {
 
     const timestamp = Number(at);
     const now = Number.isFinite(timestamp) ? timestamp : Date.now();
-    if (lastAt !== null && now - lastAt >= roundGapMs) reset();
+    if (lastAt !== null && (now < lastAt || now - lastAt >= roundGapMs)) reset();
 
     messages.push({ text, at: now });
     if (messages.length > windowSize) messages = messages.slice(-windowSize);
     lastAt = now;
 
-    const count = messages.reduce((total, item) => total + (item.text === text ? 1 : 0), 0);
-    if (count < threshold) return result(false, text, count, 'threshold');
-    if (followedTexts.has(text)) return result(false, text, count, 'already-followed');
-    if (sentCount >= maxSendsPerRound) return result(false, text, count, 'round-limit');
+    const currentCount = messages.reduce((total, item) => total + (item.text === text ? 1 : 0), 0);
+    if (messages.length < windowSize) return result(false, text, currentCount, 'burst-size');
 
-    followedTexts.add(text);
+    const burstAge = now - messages[0].at;
+    if (burstAge > burstWindowMs) return result(false, text, currentCount, 'burst-window');
+
+    const counts = new Map();
+    for (const item of messages) counts.set(item.text, (counts.get(item.text) || 0) + 1);
+
+    let winnerText = messages[messages.length - 1].text;
+    let winnerCount = counts.get(winnerText) || 0;
+    let winnerIndex = messages.length - 1;
+    messages.forEach((item, index) => {
+      const count = counts.get(item.text) || 0;
+      if (count > winnerCount || (count === winnerCount && index >= winnerIndex)) {
+        winnerText = item.text;
+        winnerCount = count;
+        winnerIndex = index;
+      }
+    });
+
+    if (followedTexts.has(winnerText)) return result(false, winnerText, winnerCount, 'already-followed');
+    if (sentCount >= maxSendsPerRound) return result(false, winnerText, winnerCount, 'round-limit');
+
+    followedTexts.add(winnerText);
     sentCount += 1;
-    return result(true, text, count);
+    messages = [];
+    return {
+      ...result(true, winnerText, winnerCount),
+      batchSize: windowSize,
+      burstWindowMs,
+    };
   }
 
   return {
@@ -123,11 +193,14 @@ export function createDanmuFollowTracker(options = {}) {
  */
 export function createDanmuFollowController(options = {}) {
   const tracker = options.tracker || createDanmuFollowTracker(options);
+  const roundTracker = options.roundTracker || createDanmuRoundTracker(options);
   const enabled = options.enabled === undefined ? () => true : options.enabled;
   const send = options.send || (text => sendDanmuText(text));
   const getCurrentUserId = options.getCurrentUserId || (() => null);
   const getNow = options.now || (() => Date.now());
   const ownEchoTtlMs = finitePositive(options.ownEchoTtlMs, 10_000);
+  const onRoundStart = typeof options.onRoundStart === 'function' ? options.onRoundStart : null;
+  const onFollowTrigger = typeof options.onFollowTrigger === 'function' ? options.onFollowTrigger : null;
   const pendingOwn = new Map();
 
   function isEnabled() {
@@ -165,18 +238,12 @@ export function createDanmuFollowController(options = {}) {
     return true;
   }
 
-  function handle(message, { notificationOnly = false } = {}) {
+  async function handle(message, { notificationOnly = false } = {}) {
     const parsed = extractDanmuMessage(message);
     if (!parsed) return { handled: false, triggered: false, reason: 'not-danmu' };
 
     if (notificationOnly) {
       return { handled: true, triggered: false, text: parsed.text, reason: 'notification-only' };
-    }
-
-    if (!isEnabled()) {
-      tracker.reset();
-      pendingOwn.clear();
-      return { handled: true, triggered: false, text: parsed.text, reason: 'disabled' };
     }
 
     const rawNow = Number(getNow());
@@ -189,24 +256,73 @@ export function createDanmuFollowController(options = {}) {
       return { handled: true, triggered: false, text: parsed.text, reason: 'own-echo' };
     }
 
+    const round = roundTracker.observe(now);
+    if (round.roundStarted) {
+      try {
+        onRoundStart?.({ ...round, text: parsed.text });
+      } catch {}
+    }
+
+    if (!isEnabled()) {
+      tracker.reset();
+      pendingOwn.clear();
+      return {
+        handled: true,
+        triggered: false,
+        text: parsed.text,
+        roundNumber: round.roundNumber,
+        at: round.at,
+        roundStarted: round.roundStarted,
+        reason: 'disabled',
+      };
+    }
+
     const observation = tracker.observe(parsed.text, now);
-    if (!observation.triggered) return { handled: true, ...observation };
+    const enriched = {
+      ...observation,
+      roundNumber: round.roundNumber,
+      at: round.at,
+    };
+    if (!observation.triggered) {
+      return { handled: true, ...enriched };
+    }
+
+    try {
+      onFollowTrigger?.(enriched);
+    } catch {}
 
     let sendResult;
     try {
-      sendResult = send(parsed.text);
+      sendResult = send(observation.text);
     } catch (error) {
-      sendResult = { sent: false, text: parsed.text, reason: 'send-error', error };
+      sendResult = { sent: false, text: observation.text, reason: 'send-error', error };
     }
-    if (sendResult === true || sendResult?.sent === true) rememberOwn(parsed.text, now);
 
-    return { handled: true, ...observation, sendResult };
+    const finalize = resolved => {
+      if (
+        resolved === true
+        || (resolved?.sent === true && resolved?.verified !== false)
+      ) rememberOwn(observation.text, now);
+      return { handled: true, ...enriched, sendResult: resolved };
+    };
+
+    if (sendResult && typeof sendResult.then === 'function') {
+      return sendResult.then(finalize, error => finalize({
+        sent: false,
+        text: observation.text,
+        reason: 'send-error',
+        error,
+      }));
+    }
+
+    return finalize(sendResult);
   }
 
   return {
     handle,
     reset() {
       tracker.reset();
+      roundTracker.reset();
       pendingOwn.clear();
     },
     getSnapshot() {
