@@ -107,7 +107,7 @@ jobs:
           BUILD_VERSION: independent-blackbox
         run: npm run build
       - name: Install isolated browser test dependency
-        run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.55.0
+        run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.63.0
       - name: Install Chromium runtime
         run: npx playwright install --with-deps chromium
       - name: Exercise freshly built userscript as a black box
