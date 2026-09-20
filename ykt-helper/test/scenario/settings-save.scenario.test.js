@@ -177,6 +177,28 @@ test('synthetic settings save cannot mutate persisted security-sensitive configu
   assert.equal(localStorage.getItem('ykt-helper:config'), beforePersisted);
 });
 
+test('settings persistence failure rolls back changes and reports failure', async () => {
+  const profile = ui.config.ai.profiles[0];
+  const originalKey = profile.apiKey;
+  const originalPersisted = localStorage.getItem('ykt-helper:config');
+  const originalEvents = configChangedEvents;
+  profile.apiKey = 'TEST_PRIVATE_STORAGE_FAILURE_KEY';
+  const expectedConfig = JSON.stringify(ui.config);
+
+  try {
+    setChecked('ykt-input-auto-answer', !ui.config.autoAnswer);
+    byId('ykt-btn-settings-save').click();
+    await flushAsyncHandler();
+
+    assert.equal(JSON.stringify(ui.config), expectedConfig);
+    assert.equal(localStorage.getItem('ykt-helper:config'), originalPersisted);
+    assert.equal(configChangedEvents, originalEvents);
+    assert.ok(toasts.some(message => message.includes('设置保存失败')));
+  } finally {
+    ui.config.ai.profiles[0].apiKey = originalKey;
+  }
+});
+
 test.after(async () => {
   await screenWakeLock.dispose();
   restoreTemplateMaterializer();

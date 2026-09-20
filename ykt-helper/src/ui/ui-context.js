@@ -14,8 +14,10 @@ function saveConfig() {
       autoAnswerOnAutoJoin: !!this.config.autoAnswerOnAutoJoin,
     });
     emitInternalEvent('auto-answer-config-changed');
+    return true;
   } catch (error) {
     console.warn('[ui.saveConfig] failed', error);
+    return false;
   }
 }
 

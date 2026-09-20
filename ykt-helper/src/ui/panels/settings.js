@@ -344,9 +344,25 @@ export function mountSettingsPanel() {
   syncMountedForm = syncFormFromConfig;
   syncFormFromConfig();
 
+  function captureConfigSnapshot() {
+    return JSON.parse(JSON.stringify(ui.config));
+  }
+
+  function restoreConfigSnapshot(snapshot) {
+    for (const key of Object.keys(ui.config)) delete ui.config[key];
+    Object.assign(ui.config, snapshot);
+    syncFormFromConfig();
+  }
+
+  function reportConfigSaveFailure(snapshot) {
+    restoreConfigSnapshot(snapshot);
+    ui.toast('设置保存失败；本次修改未应用，请检查 userscript manager 私有存储权限', 5000);
+  }
+
   // 保存设置
 
   root.querySelector('#ykt-btn-settings-save').addEventListener('click', trustedUiHandler(async () => {
+    const previousConfig = captureConfigSnapshot();
     // --- 保存当前 Profile ---
     const ai = ui.config.ai;
     const pid = ai.activeProfileId;
@@ -418,7 +434,6 @@ export function mountSettingsPanel() {
     if (curOpt) curOpt.textContent = p.name || p.id;
 
     ai.kimiApiKey = p.apiKey;
-    storage.set('kimiApiKey', p.apiKey);
     ui.config.autoJoinEnabled = !!$autoJoin.checked;
     ui.config.autoAnswerOnAutoJoin = !!$autoJoinAutoAnswer.checked;
     ui.config.autoAnswer = !!$auto.checked;
@@ -443,7 +458,10 @@ export function mountSettingsPanel() {
     ui.config.autoFollowDanmu = !!$autoFollowDanmu.checked;
     ui.config.keepScreenAwake = !!$keepScreenAwake.checked;
 
-    ui.saveConfig();
+    if (ui.saveConfig() === false) {
+      reportConfigSaveFailure(previousConfig);
+      return;
+    }
     syncSecretField($api, !!p.apiKey, '输入当前配置的 API Key');
     syncSecretField($ocrApiKey, !!ai.ocrApiKey, '留空则复用当前 AI Profile 的 API Key');
     syncSecretField($translateApiKey, !!ai.translateApiKey, '留空则复用当前 AI Profile 的 API Key');
@@ -467,6 +485,7 @@ export function mountSettingsPanel() {
 
   root.querySelector('#ykt-btn-settings-reset').addEventListener('click', trustedUiHandler(async () => {
     if (!confirm('确定要重置为默认设置吗？')) return;
+    const previousConfig = captureConfigSnapshot();
 
     Object.assign(ui.config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
 
@@ -479,9 +498,10 @@ export function mountSettingsPanel() {
     ui.config.autoScanUnanswered = false;
     syncFormFromConfig();
 
-    storage.set('kimiApiKey', '');
-
-    ui.saveConfig();
+    if (ui.saveConfig() === false) {
+      reportConfigSaveFailure(previousConfig);
+      return;
+    }
     document.getElementById('ykt-btn-bell')?.classList.toggle('active', ui.config.notifyProblems);
     ui.updateAutoAnswerBtn();
     await screenWakeLock.setEnabled(false);

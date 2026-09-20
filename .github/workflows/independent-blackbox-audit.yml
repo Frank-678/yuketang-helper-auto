@@ -36,8 +36,20 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Build final userscript
         env:
-          BUILD_VERSION: independent-blackbox
+          BUILD_VERSION: dev
         run: npm run build
+      - name: Compare committed 1.21.6.9 release to a fresh build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp dist/ykt-helper-1216.user.js /tmp/ykt-helper-1216-field.user.js
+          sed -i 's/^\/\/ @version[[:space:]]\+1\.21\.6$/\/\/ @version      1.21.6.9/' /tmp/ykt-helper-1216-field.user.js
+          test "$(grep -Fxc '// @version      1.21.6.9' /tmp/ykt-helper-1216-field.user.js)" -eq 1
+          sha256sum /tmp/ykt-helper-1216-field.user.js ../release/ykt-helper-1216-field.user.js
+          cmp --silent /tmp/ykt-helper-1216-field.user.js ../release/ykt-helper-1216-field.user.js || {
+            echo 'Rebuilt userscript differs from committed release/ykt-helper-1216-field.user.js' >&2
+            exit 1
+          }
       - name: Validate final file only
         shell: bash
         run: |

@@ -22,8 +22,13 @@ export function installToolbar() {
 
   // 事件绑定
   bar.querySelector('#ykt-btn-bell')?.addEventListener('click', trustedUiHandler(() => {
-    ui.config.notifyProblems = !ui.config.notifyProblems;
-    ui.saveConfig();
+    const previous = ui.config.notifyProblems;
+    ui.config.notifyProblems = !previous;
+    if (ui.saveConfig() === false) {
+      ui.config.notifyProblems = previous;
+      ui.toast('设置保存失败，修改未应用', 4000);
+      return;
+    }
     ui.toast(`习题提醒：${ui.config.notifyProblems ? '开' : '关'}`);
     bar.querySelector('#ykt-btn-bell')?.classList.toggle('active', ui.config.notifyProblems);
   }));
@@ -45,8 +50,14 @@ export function installToolbar() {
   }));
 
   bar.querySelector('#ykt-btn-auto-answer')?.addEventListener('click', trustedUiHandler(() => {
-    ui.config.autoAnswer = !ui.config.autoAnswer;
-    ui.saveConfig();
+    const previous = ui.config.autoAnswer;
+    ui.config.autoAnswer = !previous;
+    if (ui.saveConfig() === false) {
+      ui.config.autoAnswer = previous;
+      ui.updateAutoAnswerBtn();
+      ui.toast('设置保存失败，修改未应用', 4000);
+      return;
+    }
     ui.toast(`自动作答：${ui.config.autoAnswer ? '开' : '关'}`);
     ui.updateAutoAnswerBtn();
   }));
