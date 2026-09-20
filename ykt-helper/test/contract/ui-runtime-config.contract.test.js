@@ -3,7 +3,7 @@ import test from 'node:test';
 import { installBrowserGlobals, uninstallBrowserGlobals } from '../support/browser-harness.js';
 
 const prefix = 'ykt-helper:';
-const browser = installBrowserGlobals({
+installBrowserGlobals({
   href: 'https://www.yuketang.cn/v2/web/index',
   storage: {
     [`${prefix}config`]: JSON.stringify({

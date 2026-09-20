@@ -6,7 +6,7 @@ import {
   uninstallBrowserGlobals,
 } from '../support/browser-harness.js';
 
-const { window, document } = installBrowserGlobals({
+const { document } = installBrowserGlobals({
   href: 'https://www.yuketang.cn/lesson/fullscreen/v3/danmu-l4',
 });
 

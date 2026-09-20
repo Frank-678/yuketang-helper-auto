@@ -8,7 +8,7 @@ const indexSource = fs.readFileSync(new URL('../../src/index.js', import.meta.ur
 test('Font Awesome runtime CSS is loaded through one SRI-protected helper', () => {
   assert.match(indexSource, /ensureFontAwesome/);
   assert.doesNotMatch(indexSource, /function\s+loadFA\s*\(/);
-  assert.doesNotMatch(indexSource, /cdnjs\.cloudflare\.com\/ajax\/libs\/font-awesome/);
+  assert.equal(indexSource.includes('cdnjs.cloudflare.com/ajax/libs/font-awesome'), false);
 
   assert.match(envSource, /font-awesome\/6\.4\.0\/css\/all\.min\.css/);
   assert.match(envSource, /sha512-iecdLmaskl7CVkqkXNQ\/ZH\/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT\/E0iPtmFIB46ZmdtAc9eNBvH0H\/ZpiBw==/);

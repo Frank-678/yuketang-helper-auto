@@ -5,7 +5,7 @@ import {
   uninstallBrowserGlobals,
 } from '../support/browser-harness.js';
 
-const browser = installBrowserGlobals({
+installBrowserGlobals({
   href: 'https://www.yuketang.cn/lesson/fullscreen/v3/42',
   storage: { Authorization: 'token' },
 });

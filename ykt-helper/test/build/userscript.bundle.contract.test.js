@@ -93,7 +93,7 @@ test('remote runtime JavaScript dependencies are exact-version metadata requirem
   assert.match(text, /@require\s+https:\/\/cdn\.jsdelivr\.net\/npm\/html2canvas@1\.4\.1\/dist\/html2canvas\.min\.js/);
   assert.match(text, /@require\s+https:\/\/cdn\.jsdelivr\.net\/npm\/jspdf@2\.5\.1\/dist\/jspdf\.umd\.min\.js/);
   assert.match(text, /@require\s+https:\/\/cdn\.jsdelivr\.net\/npm\/mathjax@3\.2\.2\/es5\/tex-svg\.min\.js/);
-  assert.doesNotMatch(text, /html2canvas\.hertzen\.com/);
+  assert.equal(text.includes('html2canvas.hertzen.com'), false);
   assert.doesNotMatch(text, /mathjax@3\/es5/);
 });
 
@@ -106,6 +106,9 @@ test('bundle does not dynamically inject remote JavaScript tags at runtime', () 
 
 test('metadata declares Tampermonkey connect permissions for built-in and custom AI endpoints', () => {
   const text = bundle();
+  const connectPermissions = text.split(/\r?\n/)
+    .filter(line => line.startsWith('// @connect'))
+    .map(line => line.slice('// @connect'.length).trim());
   for (const domain of [
     'api.moonshot.cn',
     'api.openai.com',
@@ -115,9 +118,9 @@ test('metadata declares Tampermonkey connect permissions for built-in and custom
     'localhost',
     '127.0.0.1',
   ]) {
-    assert.match(text, new RegExp('^// @connect\\s+' + domain.replaceAll('.', '\\.') + '$', 'm'));
+    assert.ok(connectPermissions.includes(domain), 'missing @connect ' + domain);
   }
-  assert.match(text, /^\/\/ @connect\s+\*$/m);
+  assert.ok(connectPermissions.includes('*'));
 });
 
 
