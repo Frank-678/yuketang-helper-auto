@@ -746,8 +746,14 @@ export function mountPresentationPanel() {
   const cb = $('#ykt-show-all-slides');
   cb.checked = !!ui.config.showAllSlides;
   cb.addEventListener('change', () => {
+    const previousValue = !!ui.config.showAllSlides;
     ui.config.showAllSlides = !!cb.checked;
-    ui.saveConfig();
+    if (ui.saveConfig() === false) {
+      ui.config.showAllSlides = previousValue;
+      cb.checked = previousValue;
+      ui.toast('设置保存失败，修改未应用', 4000);
+      return;
+    }
     L('切换 showAllSlides =', ui.config.showAllSlides);
     updatePresentationList();
   });

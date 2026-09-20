@@ -200,6 +200,24 @@ test('settings persistence failure rolls back changes and reports failure', asyn
   }
 });
 
+test('custom audio persistence failure restores the previous configuration', () => {
+  const previousSrc = ui.config.customNotifyAudioSrc;
+  const previousName = ui.config.customNotifyAudioName;
+  const originalSaveConfig = ui.saveConfig;
+
+  try {
+    ui.saveConfig = () => false;
+    assert.equal(ui.setCustomNotifyAudio({
+      src: 'data:audio/test;base64,ZmFpbHVyZQ==',
+      name: 'failed-save.wav',
+    }), false);
+    assert.equal(ui.config.customNotifyAudioSrc, previousSrc);
+    assert.equal(ui.config.customNotifyAudioName, previousName);
+  } finally {
+    ui.saveConfig = originalSaveConfig;
+  }
+});
+
 test.after(async () => {
   await screenWakeLock.dispose();
   restoreTemplateMaterializer();

@@ -361,9 +361,16 @@ Object.assign(ui, {
 
   // 供设置页调用：写入/清除自定义提示音
   setCustomNotifyAudio({ src, name }) {
+    const previousSrc = this.config.customNotifyAudioSrc;
+    const previousName = this.config.customNotifyAudioName;
     this.config.customNotifyAudioSrc = src || '';
     this.config.customNotifyAudioName = name || '';
-    this.saveConfig();
+    if (this.saveConfig() === false) {
+      this.config.customNotifyAudioSrc = previousSrc;
+      this.config.customNotifyAudioName = previousName;
+      return false;
+    }
+    return true;
   },
 
   getProblemDetail(problem) {

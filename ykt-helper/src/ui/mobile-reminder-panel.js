@@ -167,13 +167,25 @@ export function mountMobileReminderPanel() {
   };
 
   const save = async () => {
-    Object.assign(ui.config, readReminderForm(reminderFields));
-    ui.config.notifyPopupDuration = Math.max(2000, (+$duration.value || 0) * 1000);
-    ui.config.notifyVolume = Math.max(0, Math.min(1, (+$volume.value || 0) / 100));
-    ui.config.keepScreenAwake = !!$wakeLock.checked;
-    ui.saveConfig();
+    const nextConfig = {
+      ...readReminderForm(reminderFields),
+      notifyPopupDuration: Math.max(2000, (+$duration.value || 0) * 1000),
+      notifyVolume: Math.max(0, Math.min(1, (+$volume.value || 0) / 100)),
+      keepScreenAwake: !!$wakeLock.checked,
+    };
+    const previousConfig = Object.fromEntries(
+      Object.keys(nextConfig).map(key => [key, ui.config[key]]),
+    );
+    Object.assign(ui.config, nextConfig);
+    if (ui.saveConfig() === false) {
+      Object.assign(ui.config, previousConfig);
+      sync();
+      $status.textContent = '设置保存失败，修改未应用。';
+      return false;
+    }
     const wakeLockStatus = await screenWakeLock.setEnabled(ui.config.keepScreenAwake);
     showWakeLockStatus(wakeLockStatus);
+    return true;
   };
 
   const sync = () => {

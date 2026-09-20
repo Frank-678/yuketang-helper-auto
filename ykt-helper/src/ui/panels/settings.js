@@ -522,7 +522,10 @@ export function mountSettingsPanel() {
       const reader = new FileReader();
       reader.onload = () => {
         const src = reader.result;
-        ui.setCustomNotifyAudio({ src, name: f.name });
+        if (ui.setCustomNotifyAudio({ src, name: f.name }) === false) {
+          ui.toast('设置保存失败，未应用自定义提示音', 4000);
+          return;
+        }
         $audioName.textContent = `当前：${f.name}`;
         ui._playNotifySound(ui.config.notifyVolume);
         ui.toast('已应用自定义提示音');
@@ -541,7 +544,10 @@ export function mountSettingsPanel() {
         return;
       }
 
-      ui.setCustomNotifyAudio({ src: url, name: '' });
+      if (ui.setCustomNotifyAudio({ src: url, name: '' }) === false) {
+        ui.toast('设置保存失败，未应用自定义音频URL', 4000);
+        return;
+      }
       $audioName.textContent = '当前：（自定义URL）';
       ui._playNotifySound(ui.config.notifyVolume);
       ui.toast('已应用自定义音频URL');
@@ -556,7 +562,10 @@ export function mountSettingsPanel() {
 
   if ($clear) {
     $clear.addEventListener('click', trustedUiHandler(() => {
-      ui.setCustomNotifyAudio({ src: '', name: '' });
+      if (ui.setCustomNotifyAudio({ src: '', name: '' }) === false) {
+        ui.toast('设置保存失败，未清除自定义提示音', 4000);
+        return;
+      }
       $audioName.textContent = '当前：使用内置“叮-咚”提示音';
       ui.toast('已清除自定义音频');
     }));
