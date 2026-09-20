@@ -506,7 +506,7 @@
     if (!Array.isArray(profiles)) return;
     for (const profile of profiles) if (profile && typeof profile === "object" && "apiKey" in profile) profile.apiKey = "";
   }
-  function scrubSecrets(config) {
+  function createLocalStorageConfigSnapshot(config) {
     const clean = clone(config && typeof config === "object" ? config : {});
     scrubProfileSecrets(clean.profiles);
     if (clean.ai && typeof clean.ai === "object") {
@@ -595,7 +595,7 @@
       } catch {}
     }
     _persistSanitizedConfig(value) {
-      localStorage.setItem(this.prefix + "config", JSON.stringify(scrubSecrets(value)));
+      localStorage.setItem(this.prefix + "config", JSON.stringify(createLocalStorageConfigSnapshot(value)));
       this._removeLocalLegacyKey();
     }
     get(key, dv = null) {
@@ -1819,8 +1819,10 @@
         autoAnswerOnAutoJoin: !!this.config.autoAnswerOnAutoJoin
       });
       emitInternalEvent("auto-answer-config-changed");
+      return true;
     } catch (error) {
       console.warn("[ui.saveConfig] failed", error);
+      return false;
     }
   }
   /**
@@ -1859,8 +1861,13 @@
     ui.updateAutoAnswerBtn();
     // 事件绑定
         bar.querySelector("#ykt-btn-bell")?.addEventListener("click", trustedUiHandler(() => {
-      ui.config.notifyProblems = !ui.config.notifyProblems;
-      ui.saveConfig();
+      const previous = ui.config.notifyProblems;
+      ui.config.notifyProblems = !previous;
+      if (ui.saveConfig() === false) {
+        ui.config.notifyProblems = previous;
+        ui.toast("设置保存失败，修改未应用", 4e3);
+        return;
+      }
       ui.toast(`习题提醒：${ui.config.notifyProblems ? "开" : "关"}`);
       bar.querySelector("#ykt-btn-bell")?.classList.toggle("active", ui.config.notifyProblems);
     }));
@@ -1879,8 +1886,14 @@
       btn.classList.toggle("active", !isActive);
     }));
     bar.querySelector("#ykt-btn-auto-answer")?.addEventListener("click", trustedUiHandler(() => {
-      ui.config.autoAnswer = !ui.config.autoAnswer;
-      ui.saveConfig();
+      const previous = ui.config.autoAnswer;
+      ui.config.autoAnswer = !previous;
+      if (ui.saveConfig() === false) {
+        ui.config.autoAnswer = previous;
+        ui.updateAutoAnswerBtn();
+        ui.toast("设置保存失败，修改未应用", 4e3);
+        return;
+      }
       ui.toast(`自动作答：${ui.config.autoAnswer ? "开" : "关"}`);
       ui.updateAutoAnswerBtn();
     }));
@@ -5496,10 +5509,23 @@
     }
     syncMountedForm = syncFormFromConfig;
     syncFormFromConfig();
+    function captureConfigSnapshot() {
+      return JSON.parse(JSON.stringify(ui.config));
+    }
+    function restoreConfigSnapshot(snapshot) {
+      for (const key of Object.keys(ui.config)) delete ui.config[key];
+      Object.assign(ui.config, snapshot);
+      syncFormFromConfig();
+    }
+    function reportConfigSaveFailure(snapshot) {
+      restoreConfigSnapshot(snapshot);
+      ui.toast("设置保存失败；本次修改未应用，请检查 userscript manager 私有存储权限", 5e3);
+    }
     // 保存设置
         root$4.querySelector("#ykt-btn-settings-save").addEventListener("click", trustedUiHandler(async () => {
+      const previousConfig = captureConfigSnapshot();
       // --- 保存当前 Profile ---
-      const ai = ui.config.ai;
+            const ai = ui.config.ai;
       const pid = ai.activeProfileId;
       const p = ai.profiles.find(x => x.id === pid);
       if (!p) {
@@ -5561,7 +5587,6 @@
       const curOpt = $profileSelect.querySelector(`option[value="${p.id}"]`);
       if (curOpt) curOpt.textContent = p.name || p.id;
       ai.kimiApiKey = p.apiKey;
-      storage.set("kimiApiKey", p.apiKey);
       ui.config.autoJoinEnabled = !!$autoJoin.checked;
       ui.config.autoAnswerOnAutoJoin = !!$autoJoinAutoAnswer.checked;
       ui.config.autoAnswer = !!$auto.checked;
@@ -5585,7 +5610,10 @@
       Object.assign(ui.config, readReminderForm(reminderFields));
       ui.config.autoFollowDanmu = !!$autoFollowDanmu.checked;
       ui.config.keepScreenAwake = !!$keepScreenAwake.checked;
-      ui.saveConfig();
+      if (ui.saveConfig() === false) {
+        reportConfigSaveFailure(previousConfig);
+        return;
+      }
       syncSecretField($api, !!p.apiKey, "输入当前配置的 API Key");
       syncSecretField($ocrApiKey, !!ai.ocrApiKey, "留空则复用当前 AI Profile 的 API Key");
       syncSecretField($translateApiKey, !!ai.translateApiKey, "留空则复用当前 AI Profile 的 API Key");
@@ -5599,6 +5627,7 @@
     //--------------------------------------
         root$4.querySelector("#ykt-btn-settings-reset").addEventListener("click", trustedUiHandler(async () => {
       if (!confirm("确定要重置为默认设置吗？")) return;
+      const previousConfig = captureConfigSnapshot();
       Object.assign(ui.config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
       ensureAIProfiles(ui.config.ai);
       ui.config.autoJoinEnabled = false;
@@ -5607,8 +5636,10 @@
       ui.config.autoRecoverExpired = false;
       ui.config.autoScanUnanswered = false;
       syncFormFromConfig();
-      storage.set("kimiApiKey", "");
-      ui.saveConfig();
+      if (ui.saveConfig() === false) {
+        reportConfigSaveFailure(previousConfig);
+        return;
+      }
       document.getElementById("ykt-btn-bell")?.classList.toggle("active", ui.config.notifyProblems);
       ui.updateAutoAnswerBtn();
       await screenWakeLock.setEnabled(false);
@@ -5626,10 +5657,13 @@
       const reader = new FileReader;
       reader.onload = () => {
         const src = reader.result;
-        ui.setCustomNotifyAudio({
+        if (ui.setCustomNotifyAudio({
           src: src,
           name: f.name
-        });
+        }) === false) {
+          ui.toast("设置保存失败，未应用自定义提示音", 4e3);
+          return;
+        }
         $audioName.textContent = `当前：${f.name}`;
         ui._playNotifySound(ui.config.notifyVolume);
         ui.toast("已应用自定义提示音");
@@ -5643,10 +5677,13 @@
         ui.toast("URL 必须以 http/https 或 data:audio/ 开头");
         return;
       }
-      ui.setCustomNotifyAudio({
+      if (ui.setCustomNotifyAudio({
         src: url,
         name: ""
-      });
+      }) === false) {
+        ui.toast("设置保存失败，未应用自定义音频URL", 4e3);
+        return;
+      }
       $audioName.textContent = "当前：（自定义URL）";
       ui._playNotifySound(ui.config.notifyVolume);
       ui.toast("已应用自定义音频URL");
@@ -5655,10 +5692,13 @@
       ui._playNotifySound(ui.config.notifyVolume);
     }));
     if ($clear) $clear.addEventListener("click", trustedUiHandler(() => {
-      ui.setCustomNotifyAudio({
+      if (ui.setCustomNotifyAudio({
         src: "",
         name: ""
-      });
+      }) === false) {
+        ui.toast("设置保存失败，未清除自定义提示音", 4e3);
+        return;
+      }
       $audioName.textContent = "当前：使用内置“叮-咚”提示音";
       ui.toast("已清除自定义音频");
     }));
@@ -7020,8 +7060,14 @@
     const cb = $$2("#ykt-show-all-slides");
     cb.checked = !!ui.config.showAllSlides;
     cb.addEventListener("change", () => {
+      const previousValue = !!ui.config.showAllSlides;
       ui.config.showAllSlides = !!cb.checked;
-      ui.saveConfig();
+      if (ui.saveConfig() === false) {
+        ui.config.showAllSlides = previousValue;
+        cb.checked = previousValue;
+        ui.toast("设置保存失败，修改未应用", 4e3);
+        return;
+      }
       L$1("切换 showAllSlides =", ui.config.showAllSlides);
       updatePresentationList();
     });
@@ -8321,9 +8367,16 @@
     },
     // 供设置页调用：写入/清除自定义提示音
     setCustomNotifyAudio({src: src, name: name}) {
+      const previousSrc = this.config.customNotifyAudioSrc;
+      const previousName = this.config.customNotifyAudioName;
       this.config.customNotifyAudioSrc = src || "";
       this.config.customNotifyAudioName = name || "";
-      this.saveConfig();
+      if (this.saveConfig() === false) {
+        this.config.customNotifyAudioSrc = previousSrc;
+        this.config.customNotifyAudioName = previousName;
+        return false;
+      }
+      return true;
     },
     getProblemDetail(problem) {
       if (!problem) return "题目未找到";
