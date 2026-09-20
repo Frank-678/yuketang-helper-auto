@@ -175,6 +175,10 @@ test('synthetic settings save cannot mutate persisted security-sensitive configu
 
   assert.equal(JSON.stringify(ui.config), beforeConfig);
   assert.equal(localStorage.getItem('ykt-helper:config'), beforePersisted);
+
+  // Synthetic input is rejected, so restore its form value before the next scenario.
+  setValue('ykt-ai-base-url', ui.config.ai.profiles[0].baseUrl);
+  setChecked('ykt-input-auto-answer', ui.config.autoAnswer);
 });
 
 test('settings persistence failure rolls back changes and reports failure', async () => {
