@@ -196,6 +196,7 @@ test('settings persistence failure rolls back changes and reports failure', asyn
     assert.ok(toasts.some(message => message.includes('设置保存失败')));
   } finally {
     ui.config.ai.profiles[0].apiKey = originalKey;
+    profile.apiKey = originalKey;
   }
 });
 
