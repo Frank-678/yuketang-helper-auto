@@ -173,7 +173,7 @@ function scrubProfileSecrets(profiles) {
   }
 }
 
-function scrubSecrets(config) {
+function createLocalStorageConfigSnapshot(config) {
   const clean = clone(config && typeof config === 'object' ? config : {});
   scrubProfileSecrets(clean.profiles);
   if (clean.ai && typeof clean.ai === 'object') {
@@ -269,7 +269,7 @@ export class StorageManager {
   }
 
   _persistSanitizedConfig(value) {
-    localStorage.setItem(this.prefix + 'config', JSON.stringify(scrubSecrets(value)));
+    localStorage.setItem(this.prefix + 'config', JSON.stringify(createLocalStorageConfigSnapshot(value)));
     this._removeLocalLegacyKey();
   }
 
