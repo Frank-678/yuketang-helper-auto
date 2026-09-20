@@ -1,10 +1,14 @@
+import { hasSubmittedAnswer } from '../core/answer-state.js';
+
 /**
  * Runs one AI-answer attempt.  Dependencies are injected so the state action
  * can keep browser-specific UI and network code outside this state machine.
  */
 
 function isExpired(status, now) {
-  const endTime = Number(status?.endTime);
+  const rawEndTime = status?.endTime;
+  if (rawEndTime === null || rawEndTime === undefined || rawEndTime === '') return false;
+  const endTime = Number(rawEndTime);
   return Number.isFinite(endTime) && now >= endTime;
 }
 
@@ -47,7 +51,7 @@ export function createAutoAnswerRunner({
   } = {}) {
     if (!problem || !status) return { ok: false, reason: 'missing-status' };
     if (status.answering) return { ok: false, reason: 'answering' };
-    if (status.done || (problem.result && !allowResubmit)) {
+    if ((status.done || hasSubmittedAnswer(problem.result)) && !allowResubmit) {
       return { ok: false, reason: 'answered' };
     }
 
@@ -64,6 +68,14 @@ export function createAutoAnswerRunner({
     status.lastError = '';
     emitStatus(status, onStatusChange, problem);
     notify?.('auto-answer-started', problem, source === 'manual' ? '手动强制 AI 作答已开始。' : undefined, { source });
+    console.log('[雨课堂助手][INFO][AutoAnswer] 开始作答', {
+      problemId: problem?.problemId,
+      source,
+      lessonId,
+      force,
+      forceRetry,
+    });
+    toast?.(source === 'manual' ? '手动 AI 作答开始' : '自动作答开始', 1500);
 
     let aiContent = '';
     try {
@@ -77,7 +89,13 @@ export function createAutoAnswerRunner({
       }) || null;
       let image = null;
       let prompt = '';
-      if (!hasActiveProfile(aiConfig, answerProfile)) {
+      const activeAIProfile = hasActiveProfile(aiConfig, answerProfile);
+      console.log('[雨课堂助手][INFO][AutoAnswer] 作答模式', {
+        problemId: problem?.problemId,
+        mode: activeAIProfile ? 'ai' : 'default-fallback',
+        profileId: answerProfile?.id || null,
+      });
+      if (!activeAIProfile) {
         parsed = makeDefaultAnswer(problem);
       } else {
         try {
@@ -105,13 +123,15 @@ export function createAutoAnswerRunner({
         endTime: status.endTime,
         forceRetry: shouldRetry,
         lessonId,
+        autoGate: false,
+        waitMs: 0,
       };
-      if (force) {
-        submitOptions.autoGate = false;
-        submitOptions.waitMs = 0;
-      }
 
       let submission = await submitAnswer(problem, parsed, submitOptions);
+      console.log('[雨课堂助手][INFO][AutoAnswer] 首次提交成功', {
+        problemId: problem?.problemId,
+        route: submission?.route || null,
+      });
       let finalAnswer = parsed;
       let finalAIContent = aiContent;
       let verificationState = 'disabled';
@@ -130,9 +150,15 @@ export function createAutoAnswerRunner({
           });
           verificationState = verification?.state || 'unavailable';
           if (verificationState === 'corrected' && verification?.answer !== undefined) {
-            submission = await submitAnswer(problem, verification.answer, submitOptions);
-            finalAnswer = verification.answer;
-            finalAIContent = verification.aiAnswer ?? aiContent;
+            try {
+              const correctedSubmission = await submitAnswer(problem, verification.answer, submitOptions);
+              submission = correctedSubmission;
+              finalAnswer = verification.answer;
+              finalAIContent = verification.aiAnswer ?? aiContent;
+            } catch (error) {
+              verificationState = 'correction-failed';
+              console.warn('[雨课堂助手][WARN][AutoAnswer] 验证模型给出修正，但修正提交失败，保留首次成功提交:', error);
+            }
           } else if (verification?.aiAnswer !== undefined) {
             finalAIContent = verification.aiAnswer;
           }
@@ -168,6 +194,11 @@ export function createAutoAnswerRunner({
       status.attempts = Math.max(0, Number(status.attempts) || 0) + 1;
       status.lastError = errorMessage(error);
       emitStatus(status, onStatusChange, problem);
+      console.error('[雨课堂助手][ERR][AutoAnswer] 作答失败', {
+        problemId: problem?.problemId,
+        source,
+        error: status.lastError,
+      });
       notify?.('auto-answer-failed', problem, `AI 作答失败：${status.lastError}`, { source });
       toast?.(`AI 作答失败：${status.lastError}`, 4000);
       return { ok: false, reason: 'error', error };

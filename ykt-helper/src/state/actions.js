@@ -20,14 +20,18 @@ import { getProblemEndTime } from './problem-timing.js';
 import { createProblemRecoveryStore, shouldRecoverProblem } from './auto-answer-recovery.js';
 import { createAutoAnswerRunner } from './auto-answer-runner.js';
 import { buildAnswerSubmitOptions } from './answer-editor.js';
+import { hasSubmittedAnswer } from '../core/answer-state.js';
 import { createDanmuFollowController } from '../core/danmu-follow.js';
 import { sendDanmuText } from '../core/danmu-sender.js';
 import { isLiveProblemSource } from '../core/problem-event-source.js';
+import { createTimelineProblemTracker } from '../core/timeline-problem-tracker.js';
 import { syncActiveLessons, getLessonId } from '../core/active-lessons.js';
 import { createNavigationArbiter, pickLatestActiveLesson } from '../core/navigation-arbiter.js';
 
 let _autoLoopStarted = false;
 let _autoJoinStarted = false;
+let _autoJoinGeneration = 0;
+let _autoJoinTimer = null;
 let _autoOnLessonClickStarted = false;
 let _autoOnLessonClickInProgress = false;
 let _navigationArbiter = null;
@@ -44,6 +48,9 @@ const problemStartReminder = createEventReminder({
 });
 
 const danmuFollowControllers = new Map();
+const timelineProblemTracker = createTimelineProblemTracker();
+const LIVE_UNLOCK_RETRY_DELAY_MS = 250;
+const LIVE_UNLOCK_RETRY_LIMIT = 40;
 
 function createDanmuFollowControllerForLesson(lessonId) {
   return createDanmuFollowController({
@@ -80,6 +87,15 @@ function getDanmuFollowController(lessonId) {
 function currentPageLessonId() {
   const match = String(window.location.pathname || '').match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
   return match ? match[1] : null;
+}
+
+function shouldAutoAnswerForLesson(lessonId) {
+  if (ui?.config?.autoAnswer === true) return true;
+  const key = String(lessonId || '').trim();
+  if (!key) return false;
+  if (repo?.autoJoinedLessons?.has(key) && ui?.config?.autoAnswerOnAutoJoin === true) return true;
+  if (repo?.forceAutoAnswerLessons?.has(key)) return true;
+  return false;
 }
 
 const AUTO_ANSWER_EVENT_META = {
@@ -260,7 +276,7 @@ function createStatusForProblem(problem, { autoAnswerQueued = false } = {}) {
     lessonId: problem?.lessonId || null,
     startTime: problem?.startTime ?? null,
     endTime: problem?.endTime ?? null,
-    done: !!problem?.result,
+    done: hasSubmittedAnswer(problem?.result),
     autoAnswerTime: null,
     answering: false,
     phase: 'queued',
@@ -302,7 +318,7 @@ function restorePendingProblemStatuses() {
   for (const record of store.list()) {
     const problem = getProblemById(record.problemId);
     if (!problem) continue;
-    if (record.done || record.phase === 'done' || problem.result) {
+    if (record.done || record.phase === 'done' || hasSubmittedAnswer(problem.result)) {
       store.remove(record.problemId);
       continue;
     }
@@ -323,7 +339,7 @@ function restorePendingProblemStatuses() {
     for (const encountered of repo.encounteredProblems || []) {
       const problem = getProblemById(encountered.problemId);
       const pid = problemIdKey(encountered.problemId);
-      if (!problem || !pid || problem.result || getProblemStatus(pid)) continue;
+      if (!problem || !pid || hasSubmittedAnswer(problem.result) || getProblemStatus(pid)) continue;
       const status = createStatusForProblem({
         ...problem,
         presentationId: encountered.presentationId,
@@ -348,6 +364,8 @@ function restorePendingProblemStatuses() {
 if (typeof window !== 'undefined') {
   window.addEventListener('ykt:auto-answer-config-changed', () => {
     restorePendingProblemStatuses();
+    if (ui.config.autoJoinEnabled) actions.maybeStartAutoJoin();
+    else actions.stopAutoJoinLoop();
   });
 }
 
@@ -488,7 +506,7 @@ export function startAutoAnswerLoop() {
     repo.problemStatus.forEach((status, pid) => {
       if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
         const problem = getProblemById(pid);
-        if (problem && !problem.result) {
+        if (problem && !hasSubmittedAnswer(problem.result)) {
           status.autoAnswerTime = null;
           persistProblemStatus(pid, status, problem);
           handleAutoAnswerInternal(problem, {
@@ -505,10 +523,21 @@ export function startAutoAnswerLoop() {
 
 export const actions = {
   onFetchTimeline(timeline, options = {}) {
-    for (const piece of Array.isArray(timeline) ? timeline : []) {
-      if (piece?.type === 'problem') {
-        this.onUnlockProblem(piece, { ...options, source: 'timeline' });
+    const lessonId = options.lessonId || repo.currentLessonId || null;
+    const entries = timelineProblemTracker.classify(timeline, { lessonId });
+    const liveNew = entries.filter(entry => entry.isNew);
+    console.log('[雨课堂助手][INFO][Timeline] 题目分类:', {
+      lessonId: lessonId ? String(lessonId) : null,
+      totalProblems: entries.length,
+      liveNew: liveNew.length,
+      phases: entries.map(entry => ({ key: entry.key, phase: entry.phase })),
+    });
+
+    for (const entry of entries) {
+      if (entry.isNew) {
+        console.log('[雨课堂助手][INFO][Timeline] 检测到实时新增题目:', entry.key);
       }
+      this.onUnlockProblem(entry.piece, { ...options, source: entry.source });
     }
   },
 
@@ -526,7 +555,7 @@ export const actions = {
     ui.updatePresentationList();
   },
 
-  onUnlockProblem(data, { notificationOnly = false, source = 'live', lessonId = null } = {}) {
+  onUnlockProblem(data, { notificationOnly = false, source = 'live', lessonId = null, liveRetryCount = 0 } = {}) {
     const isLiveUnlock = isLiveProblemSource(source);
     const payload = data && typeof data === 'object' ? data : {};
     const problemId = firstValue(
@@ -541,9 +570,37 @@ export const actions = {
     const problem = getProblemById(problemId);
     const slide = repo.slides.get(slideId) || repo.slides.get(String(slideId));
     if (!problem || !slide) {
-      if (notificationOnly && isLiveUnlock) return notifyProblemStart(payload, problem, slide, lessonId);
-      console.log('[雨课堂助手][ERR][onUnlockProblem] 题目或幻灯片不存在');
-      return false;
+      const notified = isLiveUnlock ? notifyProblemStart(payload, problem, slide, lessonId) : false;
+      if (isLiveUnlock && !notificationOnly && liveRetryCount < LIVE_UNLOCK_RETRY_LIMIT) {
+        if (liveRetryCount === 0) {
+          console.warn('[雨课堂助手][WARN][onUnlockProblem] 实时新题已到达，但题目/幻灯片数据尚未加载；开始短暂重试', {
+            problemId,
+            slideId,
+            lessonId,
+          });
+        }
+        setTimeout(() => {
+          actions.onUnlockProblem(payload, {
+            notificationOnly: false,
+            source,
+            lessonId,
+            liveRetryCount: liveRetryCount + 1,
+          });
+        }, LIVE_UNLOCK_RETRY_DELAY_MS);
+        return notified;
+      }
+      if (isLiveUnlock && !notificationOnly) {
+        console.error('[雨课堂助手][ERR][onUnlockProblem] 实时新题数据重试后仍未加载，自动作答未启动', {
+          problemId,
+          slideId,
+          lessonId,
+          liveRetryCount,
+        });
+        ui.toast('自动作答未启动：实时新题数据 10 秒内仍未加载', 5000);
+      } else {
+        console.log('[雨课堂助手][ERR][onUnlockProblem] 题目或幻灯片不存在');
+      }
+      return notified;
     }
 
     console.log(`[雨课堂助手][DBG][onUnlockProblem] ${isLiveUnlock ? '题目解锁' : '历史时间线题目状态恢复'}`);
@@ -555,9 +612,12 @@ export const actions = {
     const recoveryStore = getProblemRecoveryStore(lessonId || repo.currentLessonId);
     const recovered = recoveryStore?.get(pid);
     const previous = getProblemStatus(pid);
+    const autoAnswerEnabled = shouldAutoAnswerForLesson(
+      lessonId || previous?.lessonId || recovered?.lessonId || problem?.lessonId || repo.currentLessonId
+    );
     const isFirstUnlock = !previous && !recovered;
     const status = previous || (recovered ? statusFromRecoveryRecord(recovered) : createStatusForProblem(problem, {
-      autoAnswerQueued: isLiveUnlock && !!ui.config.autoAnswer,
+      autoAnswerQueued: isLiveUnlock && autoAnswerEnabled,
     }));
 
     status.presentationId = payload.pres ?? status.presentationId;
@@ -565,13 +625,16 @@ export const actions = {
     status.lessonId = lessonId ? String(lessonId) : (status.lessonId || repo.currentLessonId || null);
     status.startTime = payload.dt ?? status.startTime;
     status.endTime = getProblemEndTime(payload.dt, payload.limit) ?? status.endTime ?? null;
-    status.done = !!problem.result;
+    status.done = hasSubmittedAnswer(problem.result);
     status.answering = !!status.answering;
     status.phase = statusPhase(status);
     status.autoAnswerTime = status.autoAnswerTime ?? null;
     status.autoAnswerQueued = isFirstUnlock
-      ? isLiveUnlock && !!ui.config.autoAnswer
+      ? isLiveUnlock && autoAnswerEnabled
       : status.autoAnswerQueued !== false;
+    if (isLiveUnlock && autoAnswerEnabled && !status.done) {
+      status.autoAnswerQueued = true;
+    }
     // 刷新恢复的过期任务可能已经排队等待 /retry；重复解锁事件不能清掉这个标记。
     status.recoveryForceRetry = status.recoveryForceRetry === true;
     const expired = Number.isFinite(status.endTime) && Date.now() >= status.endTime;
@@ -579,7 +642,7 @@ export const actions = {
     repo.problemStatus.set(pid, status);
     if (isLiveUnlock) persistProblemStatus(pid, status, problem);
 
-    if (problem.result) {
+    if (hasSubmittedAnswer(problem.result)) {
       console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已作答，跳过自动流程');
       recoveryStore?.remove(pid);
       return false;
@@ -602,7 +665,9 @@ export const actions = {
       return notified;
     }
 
-    if (ui.config.autoAnswer && status.autoAnswerQueued && !status.answering && status.phase !== 'failed' && status.autoAnswerTime === null) {
+    if (autoAnswerEnabled && status.autoAnswerQueued && !status.answering && status.autoAnswerTime === null) {
+      status.phase = 'queued';
+      status.lastError = '';
       const delay = expired
         ? 0
         : ui.config.autoAnswerDelay + randInt(0, ui.config.autoAnswerRandomDelay);
@@ -657,8 +722,11 @@ export const actions = {
           count: result.count,
           sentCount: result.sentCount,
         });
+        ui.toast(`弹幕已自动跟发：${result.text}`, 2500);
       } else {
+        const failureReason = result.sendResult?.reason || 'unknown';
         console.warn('[雨课堂助手][WARN][DanmuFollow] 达到跟发条件，但发送失败:', result.text, result.sendResult);
+        ui.toast(`弹幕自动跟发失败（${failureReason}）`, 4000);
       }
     }
     return result;
@@ -689,7 +757,7 @@ export const actions = {
         status.phase = 'done';
         status.autoAnswerTime = null;
       }
-      getProblemRecoveryStore()?.remove(problemId);
+      getProblemRecoveryStore(status?.lessonId || repo.currentLessonId)?.remove(problemId);
       ui.updateProblemList();
     }
   },
@@ -712,6 +780,7 @@ export const actions = {
       ...options,
       status,
       force: true,
+      allowResubmit: true,
       source: 'manual',
     });
   },
@@ -819,11 +888,13 @@ export const actions = {
     if (_autoJoinStarted) return;
     _autoJoinStarted = true;
     repo.autoJoinRunning = true;
+    const generation = ++_autoJoinGeneration;
 
     const loop = async () => {
-      if (!repo.autoJoinRunning) return;
+      if (!repo.autoJoinRunning || generation !== _autoJoinGeneration) return;
       try {
         const list = await getOnLesson();
+        if (!repo.autoJoinRunning || generation !== _autoJoinGeneration) return;
         const snapshot = syncActiveLessons([...repo.activeLessons.values()], list);
         repo.activeLessons.clear();
         for (const item of snapshot.active) repo.activeLessons.set(item.lessonId, item);
@@ -847,11 +918,8 @@ export const actions = {
               continue;
             }
             connectOrAttachLessonWS({ lessonId, auth: token });
-            // 标记该课堂为“自动进入”
+            // 标记该课堂为“自动进入”；是否自动答题由统一策略动态读取配置。
             repo.markLessonAutoJoined(lessonId, true);
-            if (ui.config.autoAnswerOnAutoJoin) {
-              repo.forceAutoAnswerLessons.add(lessonId);
-            }
           } catch (e) {
             console.error('[雨课堂助手][ERR][AutoJoin] 进入课堂失败:', lessonId, e);
           }
@@ -859,18 +927,31 @@ export const actions = {
       } catch (e) {
           console.error('[雨课堂助手][ERR][AutoJoin] 拉取正在上课失败:', e);
       } finally {
-        setTimeout(loop, 5000);
+        if (repo.autoJoinRunning && generation === _autoJoinGeneration) {
+          _autoJoinTimer = setTimeout(loop, 5000);
+        }
       }
     };
-    loop();
+    void loop();
   },
 
   stopAutoJoinLoop() {
     repo.autoJoinRunning = false;
+    _autoJoinStarted = false;
+    _autoJoinGeneration += 1;
+    if (_autoJoinTimer !== null) {
+      clearTimeout(_autoJoinTimer);
+      _autoJoinTimer = null;
+    }
     _navigationArbiter?.cancel();
     if (_autoJumpRetryTimer !== null) {
       clearTimeout(_autoJumpRetryTimer);
       _autoJumpRetryTimer = null;
+    }
+    for (const lessonId of [...repo.autoJoinedLessons]) {
+      const socket = repo.lessonSockets.get(String(lessonId));
+      try { socket?.close?.(); } catch {}
+      repo.markLessonDisconnected(lessonId, 'auto-join-stopped');
     }
   },
 

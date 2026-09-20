@@ -33,15 +33,18 @@ function maybeAutoReloadOnMount() {
     return false;
   }
 }
+let periodicReloadTimer = null;
+
 function startPeriodicReload(opts = {}) {
   try {
+    if (periodicReloadTimer !== null) return periodicReloadTimer;
     const intervalMs = Number.isFinite(opts.intervalMs) ? opts.intervalMs : 5 * 60 * 1000;
     const onlyWhenHidden = (opts.onlyWhenHidden !== false);
     const skipLessonPages = (opts.skipLessonPages !== false);
 
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
 
-      window.setInterval(() => {
+      periodicReloadTimer = window.setInterval(() => {
     try {
       console.log('[雨课堂助手]][DEBUG] periodic tick', {
         pathname: window.location.pathname,
@@ -63,7 +66,10 @@ function startPeriodicReload(opts = {}) {
       console.error(e);
     }
   }, intervalMs);
-  } catch {}
+    return periodicReloadTimer;
+  } catch {
+    return null;
+  }
 }
 
 let desktopStarted = false;
@@ -74,7 +80,6 @@ function startDesktopRuntime() {
   desktopStarted = true;
   if (maybeAutoReloadOnMount()) return;
 
-  startPeriodicReload({ intervalMs: 1 * 60 * 1000, onlyWhenHidden: false, skipLessonPages: true });
   loadFA();
   injectStyles();
   ui._mountAll?.();
@@ -128,6 +133,10 @@ function installRuntimeRouteWatcher() {
     targetDocument: targetWindow.document || document,
   });
   if (guard.redirected || guard.reason === 'loop-prevented') return;
+
+  // Periodic refresh is a base service, not a desktop-runtime side effect.
+  // It keeps running across SPA route changes, but each tick still skips /lesson/ pages.
+  startPeriodicReload({ intervalMs: 1 * 60 * 1000, onlyWhenHidden: false, skipLessonPages: true });
 
   // WebSocket needs to be patched at document-start.
   installWSInterceptor({

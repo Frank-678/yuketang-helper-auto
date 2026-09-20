@@ -1,0 +1,240 @@
+name: Apply Answer Core Repair
+
+on:
+  push:
+    branches:
+      - fix/stability-auto-answer-20260916
+    paths:
+      - .github/workflows/apply-answer-core-rebuild.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-build-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/stability-auto-answer-20260916
+          fetch-depth: 0
+
+      - name: Apply deterministic answer-core repair
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('ykt-helper')
+
+          # 1) Shared, explicit answer-state semantics.
+          state = root / 'src/core/answer-state.js'
+          state.write_text("""/** Return true only when a backend/local result contains an actual submitted answer. */
+          export function hasSubmittedAnswer(result) {
+            if (result === null || result === undefined) return false;
+            if (typeof result === 'string') return result.trim().length > 0;
+            if (Array.isArray(result)) return result.length > 0;
+            if (typeof result === 'object') return Object.keys(result).length > 0;
+            return Boolean(result);
+          }
+          """, encoding='utf-8')
+
+          # 2) Runner: empty [] / {} is NOT answered; manual force may resubmit even if status.done.
+          p = root / 'src/state/auto-answer-runner.js'
+          s = p.read_text(encoding='utf-8')
+          if "import { hasSubmittedAnswer } from '../core/answer-state.js';" not in s:
+            s = "import { hasSubmittedAnswer } from '../core/answer-state.js';\n\n" + s
+          old = "if (status.done || (problem.result && !allowResubmit)) {\n      return { ok: false, reason: 'answered' };\n    }"
+          new = "if ((status.done || hasSubmittedAnswer(problem.result)) && !allowResubmit) {\n      return { ok: false, reason: 'answered' };\n    }"
+          assert old in s, 'runner answered guard context changed'
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          # 3) Actions: replace truthiness with structural answered-state semantics.
+          p = root / 'src/state/actions.js'
+          s = p.read_text(encoding='utf-8')
+          anchor = "import { buildAnswerSubmitOptions } from './answer-editor.js';"
+          assert anchor in s, 'actions import anchor missing'
+          if "import { hasSubmittedAnswer } from '../core/answer-state.js';" not in s:
+            s = s.replace(anchor, anchor + "\nimport { hasSubmittedAnswer } from '../core/answer-state.js';", 1)
+
+          replacements = [
+            ("done: !!problem?.result,", "done: hasSubmittedAnswer(problem?.result),"),
+            ("if (record.done || record.phase === 'done' || problem.result) {", "if (record.done || record.phase === 'done' || hasSubmittedAnswer(problem.result)) {"),
+            ("if (!problem || !pid || problem.result || getProblemStatus(pid)) continue;", "if (!problem || !pid || hasSubmittedAnswer(problem.result) || getProblemStatus(pid)) continue;"),
+            ("if (problem && !problem.result) {", "if (problem && !hasSubmittedAnswer(problem.result)) {"),
+            ("status.done = !!problem.result;", "status.done = hasSubmittedAnswer(problem.result);"),
+            ("if (problem.result) {\n      console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已作答，跳过自动流程');", "if (hasSubmittedAnswer(problem.result)) {\n      console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已作答，跳过自动流程');"),
+          ]
+          for old, new in replacements:
+            assert old in s, f'actions context missing: {old[:60]!r}'
+            s = s.replace(old, new, 1)
+
+          old = "if (autoAnswerEnabled && status.autoAnswerQueued && !status.answering && status.phase !== 'failed' && status.autoAnswerTime === null) {"
+          new = "if (autoAnswerEnabled && status.autoAnswerQueued && !status.answering && status.autoAnswerTime === null) {\n      status.phase = 'queued';\n      status.lastError = '';"
+          assert old in s, 'actions scheduling gate context changed'
+          s = s.replace(old, new, 1)
+
+          old = "return handleAutoAnswerInternal(problem, {\n      ...options,\n      status,\n      force: true,\n      source: 'manual',\n    });"
+          new = "return handleAutoAnswerInternal(problem, {\n      ...options,\n      status,\n      force: true,\n      allowResubmit: true,\n      source: 'manual',\n    });"
+          assert old in s, 'forceAIAnswer context changed'
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          # 4) Problem-list manual submit: user clicks must never inherit auto-answer delay.
+          p = root / 'src/ui/panels/problem-list.js'
+          s = p.read_text(encoding='utf-8')
+          counts = {
+            "{ startTime, endTime }": s.count("{ startTime, endTime }"),
+            "{ startTime, endTime, forceRetry: true }": s.count("{ startTime, endTime, forceRetry: true }"),
+          }
+          assert counts["{ startTime, endTime }"] >= 1, counts
+          assert counts["{ startTime, endTime, forceRetry: true }"] >= 2, counts
+          s = s.replace("{ startTime, endTime }", "{ startTime, endTime, autoGate: false, waitMs: 0 }")
+          s = s.replace("{ startTime, endTime, forceRetry: true }", "{ startTime, endTime, forceRetry: true, autoGate: false, waitMs: 0 }")
+          p.write_text(s, encoding='utf-8')
+
+          # 5) Behavioral regression tests.
+          t = root / 'test/answer-state.test.js'
+          t.write_text("""import assert from 'node:assert/strict';
+          import test from 'node:test';
+          import { hasSubmittedAnswer } from '../src/core/answer-state.js';
+
+          test('empty backend result containers are still unanswered', () => {
+            assert.equal(hasSubmittedAnswer(null), false);
+            assert.equal(hasSubmittedAnswer(undefined), false);
+            assert.equal(hasSubmittedAnswer(''), false);
+            assert.equal(hasSubmittedAnswer('   '), false);
+            assert.equal(hasSubmittedAnswer([]), false);
+            assert.equal(hasSubmittedAnswer({}), false);
+          });
+
+          test('non-empty answer payloads count as submitted', () => {
+            assert.equal(hasSubmittedAnswer(['A']), true);
+            assert.equal(hasSubmittedAnswer({ content: 'x' }), true);
+            assert.equal(hasSubmittedAnswer('A'), true);
+            assert.equal(hasSubmittedAnswer(true), true);
+          });
+          """, encoding='utf-8')
+
+          # Append focused runner regressions only once.
+          t = root / 'test/auto-answer-runner.test.js'
+          s = t.read_text(encoding='utf-8')
+          marker = "empty result containers do not suppress AI execution"
+          if marker not in s:
+            s += """
+
+          test('empty result containers do not suppress AI execution', async () => {
+            const { createAutoAnswerRunner } = await loadRunner();
+            for (const result of [[], {}]) {
+              let submitted = 0;
+              const runner = createAutoAnswerRunner({
+                hasActiveProfile: () => false,
+                makeDefaultAnswer: () => ['A'],
+                submitAnswer: async () => { submitted += 1; return { route: 'answer' }; },
+              });
+              const problem = { problemId: 'empty-result', problemType: 1, result };
+              const status = { done: false, answering: false, endTime: null, phase: 'queued', autoAnswerTime: null };
+              const response = await runner.run(problem, status);
+              assert.equal(response.ok, true);
+              assert.equal(submitted, 1);
+            }
+          });
+
+          test('manual force with allowResubmit bypasses done status and existing result', async () => {
+            const { createAutoAnswerRunner } = await loadRunner();
+            let submitted = 0;
+            const runner = createAutoAnswerRunner({
+              hasActiveProfile: () => false,
+              makeDefaultAnswer: () => ['B'],
+              submitAnswer: async () => { submitted += 1; return { route: 'answer' }; },
+            });
+            const problem = { problemId: 'force-resubmit', problemType: 1, result: ['A'] };
+            const status = { done: true, answering: false, endTime: null, phase: 'done', autoAnswerTime: null };
+            const response = await runner.run(problem, status, { force: true, allowResubmit: true, source: 'manual' });
+            assert.equal(response.ok, true);
+            assert.equal(submitted, 1);
+            assert.deepEqual(response.answer, ['B']);
+          });
+          """
+            t.write_text(s, encoding='utf-8')
+
+          # Static wiring regression for immediate manual submit + force resubmit.
+          t = root / 'test/answer-core-wiring.test.js'
+          t.write_text("""import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import test from 'node:test';
+
+          const actions = fs.readFileSync(new URL('../src/state/actions.js', import.meta.url), 'utf8');
+          const list = fs.readFileSync(new URL('../src/ui/panels/problem-list.js', import.meta.url), 'utf8');
+
+          test('force AI explicitly allows resubmission', () => {
+            assert.match(actions, /force:\s*true,[\\s\\S]{0,120}allowResubmit:\s*true,[\\s\\S]{0,120}source:\s*'manual'/);
+          });
+
+          test('manual problem-list submits bypass automatic delay', () => {
+            const immediate = list.match(/autoGate:\s*false,\s*waitMs:\s*0/g) || [];
+            assert.ok(immediate.length >= 3, `expected >=3 immediate submit call sites, got ${immediate.length}`);
+          });
+
+          test('live scheduling is not permanently blocked by a prior failed phase', () => {
+            assert.doesNotMatch(actions, /status\.phase\s*!==\s*'failed'/);
+          });
+          """, encoding='utf-8')
+          PY
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ykt-helper
+        run: npm ci
+
+      - name: Run full regression suite
+        working-directory: ykt-helper
+        run: npm test
+
+      - name: Build userscript
+        working-directory: ykt-helper
+        run: npm run build
+
+      - name: Prepare 1.21.6.4 field-test userscript
+        run: |
+          set -euo pipefail
+          OUT=$(find ykt-helper/dist -maxdepth 1 -type f -name '*.user.js' | head -n 1)
+          test -n "$OUT"
+          cp "$OUT" release/ykt-helper-1216-stability-test.user.js
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('release/ykt-helper-1216-stability-test.user.js')
+          s=p.read_text(encoding='utf-8')
+          import re
+          s=re.sub(r'// @version\s+[^\n]+', '// @version      1.21.6.4', s, count=1)
+          p.write_text(s, encoding='utf-8')
+          PY
+          grep -q '@version      1.21.6.4' release/ykt-helper-1216-stability-test.user.js
+          grep -q 'hasSubmittedAnswer' release/ykt-helper-1216-stability-test.user.js
+          grep -q 'allowResubmit' release/ykt-helper-1216-stability-test.user.js
+
+      - name: Check source diff
+        run: git diff --check -- ykt-helper/src ykt-helper/test
+
+      - name: Commit only verified repair and field-test artifact
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ykt-helper/src/core/answer-state.js \
+                  ykt-helper/src/state/actions.js \
+                  ykt-helper/src/state/auto-answer-runner.js \
+                  ykt-helper/src/ui/panels/problem-list.js \
+                  ykt-helper/test/answer-state.test.js \
+                  ykt-helper/test/auto-answer-runner.test.js \
+                  ykt-helper/test/answer-core-wiring.test.js \
+                  release/ykt-helper-1216-stability-test.user.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: restore reliable answer execution semantics'
+          git push origin HEAD:fix/stability-auto-answer-20260916

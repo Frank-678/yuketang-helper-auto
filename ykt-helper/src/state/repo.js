@@ -102,8 +102,9 @@ export const repo = {
   },
 
   markLessonAutoJoined(lessonId, enabled = true) {
-    if (!lessonId) return;
-    if (enabled) this.autoJoinedLessons.add(lessonId);
-    else this.autoJoinedLessons.delete(lessonId);
+    const key = String(lessonId || '').trim();
+    if (!key) return;
+    if (enabled) this.autoJoinedLessons.add(key);
+    else this.autoJoinedLessons.delete(key);
   },
 };

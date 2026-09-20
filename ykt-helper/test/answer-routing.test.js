@@ -9,10 +9,14 @@ test('uses the normal answer route before the deadline', async () => {
   assert.equal(chooseAnswerRoute({ now: 1_000, endTime: 2_000 }), 'answer');
 });
 
-test('uses retry after the deadline even without an explicit force flag', async () => {
+test('does not use retry after the deadline unless expired retry was explicitly allowed', async () => {
   const { chooseAnswerRoute } = await loadAnswerRouting();
 
-  assert.equal(chooseAnswerRoute({ now: 2_000, endTime: 2_000 }), 'retry');
+  assert.equal(chooseAnswerRoute({ now: 2_000, endTime: 2_000 }), 'answer');
+  assert.equal(
+    chooseAnswerRoute({ now: 2_000, endTime: 2_000, allowRetryAfterDeadline: true }),
+    'retry',
+  );
 });
 
 test('uses retry when explicitly forced before the deadline', async () => {

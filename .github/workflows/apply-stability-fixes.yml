@@ -1,0 +1,464 @@
+name: Apply Stability Fixes
+
+on:
+  push:
+    branches:
+      - fix/stability-auto-answer-20260916
+    paths:
+      - '.github/workflows/apply-stability-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/stability-auto-answer-20260916
+          fetch-depth: 0
+
+      - name: Apply narrowly scoped fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'expected patch context not found: {path}\n---\n{old[:500]}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          policy = Path('ykt-helper/src/core/auto-answer-policy.js')
+          policy.write_text("""function containsLesson(setLike, lessonId) {
+            const key = String(lessonId ?? '').trim();
+            if (!key || !setLike) return false;
+            for (const candidate of setLike) {
+              if (String(candidate) === key) return true;
+            }
+            return false;
+          }
+
+          /** Decide whether an event belonging to one lesson may enter auto-answer. */
+          export function shouldAutoAnswerForLesson(config = {}, lessonId = null, state = {}) {
+            if (config?.autoAnswer === true) return true;
+            const key = String(lessonId ?? '').trim();
+            if (!key) return false;
+            if (config?.autoAnswerOnAutoJoin === true && containsLesson(state?.autoJoinedLessons, key)) {
+              return true;
+            }
+            return containsLesson(state?.forceAutoAnswerLessons, key);
+          }
+          """, encoding='utf-8')
+
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              "import { isLiveProblemSource } from '../core/problem-event-source.js';\n",
+              "import { isLiveProblemSource } from '../core/problem-event-source.js';\nimport { shouldAutoAnswerForLesson } from '../core/auto-answer-policy.js';\n",
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              "let _autoJoinStarted = false;\nlet _autoOnLessonClickStarted = false;",
+              "let _autoJoinStarted = false;\nlet _autoJoinTimer = null;\nlet _autoJoinGeneration = 0;\nlet _autoOnLessonClickStarted = false;",
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              """if (typeof window !== 'undefined') {
+            window.addEventListener('ykt:auto-answer-config-changed', () => {
+              restorePendingProblemStatuses();
+            });
+          }
+          """,
+              """if (typeof window !== 'undefined') {
+            window.addEventListener('ykt:auto-answer-config-changed', () => {
+              restorePendingProblemStatuses();
+              if (ui.config.autoAnswerOnAutoJoin !== true) {
+                for (const lessonId of repo.autoJoinedLessons) repo.forceAutoAnswerLessons.delete(lessonId);
+              }
+              if (ui.config.autoJoinEnabled) actions.maybeStartAutoJoin();
+              else actions.stopAutoJoinLoop();
+            });
+          }
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              """    lessonId: options.lessonId || ensuredStatus.lessonId || repo.currentLessonId,
+            });
+          }
+          """,
+              """    lessonId: options.lessonId || ensuredStatus.lessonId || repo.currentLessonId,
+              allowRetryAfterDeadline: options.allowRetryAfterDeadline === true,
+            });
+          }
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              """            forceRetry: status.recoveryForceRetry === true,
+                        source: status.recoveryForceRetry === true ? 'recovery' : 'auto',
+                      });
+          """,
+              """            forceRetry: status.recoveryForceRetry === true,
+                        allowRetryAfterDeadline: ui.config.autoForceRetry === true,
+                        source: status.recoveryForceRetry === true ? 'recovery' : 'auto',
+                      });
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              """    const pid = problemIdKey(problemId);
+              const recoveryStore = getProblemRecoveryStore(lessonId || repo.currentLessonId);
+              const recovered = recoveryStore?.get(pid);
+              const previous = getProblemStatus(pid);
+              const isFirstUnlock = !previous && !recovered;
+              const status = previous || (recovered ? statusFromRecoveryRecord(recovered) : createStatusForProblem(problem, {
+                autoAnswerQueued: isLiveUnlock && !!ui.config.autoAnswer,
+              }));
+
+              status.presentationId = payload.pres ?? status.presentationId;
+              status.slideId = slideId ?? status.slideId;
+              status.lessonId = lessonId ? String(lessonId) : (status.lessonId || repo.currentLessonId || null);
+          """,
+              """    const pid = problemIdKey(problemId);
+              const eventLessonId = lessonId ? String(lessonId) : (repo.currentLessonId || null);
+              const autoAnswerEnabled = shouldAutoAnswerForLesson(ui.config, eventLessonId, repo);
+              const recoveryStore = getProblemRecoveryStore(eventLessonId);
+              const recovered = recoveryStore?.get(pid);
+              const previous = getProblemStatus(pid);
+              const isFirstUnlock = !previous && !recovered;
+              const status = previous || (recovered ? statusFromRecoveryRecord(recovered) : createStatusForProblem(problem, {
+                autoAnswerQueued: isLiveUnlock && autoAnswerEnabled,
+              }));
+
+              status.presentationId = payload.pres ?? status.presentationId;
+              status.slideId = slideId ?? status.slideId;
+              status.lessonId = eventLessonId || status.lessonId || null;
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              """    status.autoAnswerTime = status.autoAnswerTime ?? null;
+              status.autoAnswerQueued = isFirstUnlock
+                ? isLiveUnlock && !!ui.config.autoAnswer
+                : status.autoAnswerQueued !== false;
+          """,
+              """    status.autoAnswerTime = status.autoAnswerTime ?? null;
+              if (isLiveUnlock && autoAnswerEnabled) {
+                // Timeline replay may have created a non-queued status first. A real unlock
+                // must re-arm it, otherwise the user gets a reminder but no automatic answer.
+                status.autoAnswerQueued = true;
+              } else if (isFirstUnlock) {
+                status.autoAnswerQueued = false;
+              } else {
+                status.autoAnswerQueued = status.autoAnswerQueued !== false;
+              }
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              "if (ui.config.autoAnswer && status.autoAnswerQueued && !status.answering && status.phase !== 'failed' && status.autoAnswerTime === null) {",
+              "if (autoAnswerEnabled && status.autoAnswerQueued && !status.answering && status.phase !== 'failed' && status.autoAnswerTime === null) {",
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              "      getProblemRecoveryStore()?.remove(problemId);",
+              "      getProblemRecoveryStore(status?.lessonId || repo.currentLessonId)?.remove(problemId);",
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              """          forceRetry: status.recoveryForceRetry === true,
+                      source: status.recoveryForceRetry === true ? 'recovery' : 'auto',
+                    });
+          """,
+              """          forceRetry: status.recoveryForceRetry === true,
+                      allowRetryAfterDeadline: ui.config.autoForceRetry === true,
+                      source: status.recoveryForceRetry === true ? 'recovery' : 'auto',
+                    });
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              """  startAutoJoinLoop() {
+              if (_autoJoinStarted) return;
+              _autoJoinStarted = true;
+              repo.autoJoinRunning = true;
+
+              const loop = async () => {
+                if (!repo.autoJoinRunning) return;
+          """,
+              """  startAutoJoinLoop() {
+              if (_autoJoinStarted) return;
+              _autoJoinStarted = true;
+              repo.autoJoinRunning = true;
+              const generation = ++_autoJoinGeneration;
+
+              const loop = async () => {
+                if (!repo.autoJoinRunning || generation !== _autoJoinGeneration) return;
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              """            // 标记该课堂为“自动进入”
+                        repo.markLessonAutoJoined(lessonId, true);
+                        if (ui.config.autoAnswerOnAutoJoin) {
+                          repo.forceAutoAnswerLessons.add(lessonId);
+                        }
+          """,
+              """            // 标记该课堂为“自动进入”。是否自动答题由实时配置动态决定，
+                        // 不写入 forceAutoAnswerLessons，避免关闭开关后仍被永久强制。
+                        repo.markLessonAutoJoined(lessonId, true);
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/actions.js',
+              """      } finally {
+                setTimeout(loop, 5000);
+              }
+            };
+            loop();
+          },
+
+          stopAutoJoinLoop() {
+            repo.autoJoinRunning = false;
+            _navigationArbiter?.cancel();
+            if (_autoJumpRetryTimer !== null) {
+              clearTimeout(_autoJumpRetryTimer);
+              _autoJumpRetryTimer = null;
+            }
+          },
+          """,
+              """      } finally {
+                if (repo.autoJoinRunning && generation === _autoJoinGeneration) {
+                  _autoJoinTimer = setTimeout(loop, 5000);
+                }
+              }
+            };
+            void loop();
+          },
+
+          stopAutoJoinLoop() {
+            repo.autoJoinRunning = false;
+            _autoJoinStarted = false;
+            _autoOnLessonClickStarted = false;
+            _autoOnLessonClickInProgress = false;
+            _autoJoinGeneration += 1;
+            if (_autoJoinTimer !== null) {
+              clearTimeout(_autoJoinTimer);
+              _autoJoinTimer = null;
+            }
+            for (const lessonId of [...repo.autoJoinedLessons]) {
+              const socket = repo.lessonSockets.get(String(lessonId));
+              repo.markLessonDisconnected(lessonId, 'auto-join-disabled');
+              try { socket?.close?.(); } catch {}
+            }
+            _navigationArbiter?.cancel();
+            if (_autoJumpRetryTimer !== null) {
+              clearTimeout(_autoJumpRetryTimer);
+              _autoJumpRetryTimer = null;
+            }
+          },
+          """,
+          )
+
+          replace_once(
+              'ykt-helper/src/tsm/answer.js',
+              "import { chooseAnswerRoute } from './answer-routing.js';\n",
+              "import { chooseAnswerRoute } from './answer-routing.js';\nimport { shouldAutoAnswerForLesson } from '../core/auto-answer-policy.js';\n",
+          )
+          replace_once(
+              'ykt-helper/src/tsm/answer.js',
+              """function shouldAutoAnswerForLesson_(lessonId) {
+            if (ui?.config?.autoAnswer) return true;
+            if (!lessonId) return false;
+            if (repo?.autoJoinedLessons?.has(lessonId) && ui?.config?.autoAnswerOnAutoJoin) return true;
+            if (repo?.forceAutoAnswerLessons?.has(lessonId)) return true;
+            return false;
+          }
+
+
+          """,
+              "",
+          )
+          replace_once(
+              'ykt-helper/src/tsm/answer.js',
+              "if (autoGate && shouldAutoAnswerForLesson_(lessonId)) {",
+              "if (autoGate && shouldAutoAnswerForLesson(ui?.config, lessonId, repo)) {",
+          )
+          replace_once(
+              'ykt-helper/src/tsm/answer.js',
+              "  const route = chooseAnswerRoute({ now, endTime, forceRetry });",
+              "  const route = chooseAnswerRoute({\n    now,\n    endTime,\n    forceRetry,\n    allowRetryAfterDeadline: submitOptions?.allowRetryAfterDeadline === true,\n  });",
+          )
+
+          Path('ykt-helper/src/tsm/answer-routing.js').write_text("""/** Select the server route for one answer attempt. */
+          export function chooseAnswerRoute({
+            now = Date.now(),
+            endTime = null,
+            forceRetry = false,
+            allowRetryAfterDeadline = false,
+          } = {}) {
+            if (forceRetry) return 'retry';
+            if (endTime === null || endTime === undefined || endTime === '') return 'answer';
+            const current = Number(now);
+            const deadline = Number(endTime);
+            if (
+              allowRetryAfterDeadline
+              && Number.isFinite(current)
+              && Number.isFinite(deadline)
+              && current >= deadline
+            ) {
+              return 'retry';
+            }
+            return 'answer';
+          }
+          """, encoding='utf-8')
+
+          replace_once(
+              'ykt-helper/src/state/auto-answer-runner.js',
+              """    allowResubmit = false,
+                source = force ? 'manual' : 'auto',
+                lessonId = null,
+          """,
+              """    allowResubmit = false,
+                allowRetryAfterDeadline = false,
+                source = force ? 'manual' : 'auto',
+                lessonId = null,
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/auto-answer-runner.js',
+              """    if (expired && !force && !forceRetry) {
+                return { ok: false, reason: 'expired' };
+              }
+          """,
+              """    if (expired && !force && !forceRetry && !allowRetryAfterDeadline) {
+                status.answering = false;
+                status.phase = 'failed';
+                status.autoAnswerTime = null;
+                status.lastError = '题目已过期，未开启自动强制补交';
+                emitStatus(status, onStatusChange, problem);
+                notify?.('auto-answer-failed', problem, status.lastError, { source });
+                return { ok: false, reason: 'expired' };
+              }
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/auto-answer-runner.js',
+              """      const submitOptions = {
+                startTime: status.startTime,
+                endTime: status.endTime,
+                forceRetry: shouldRetry,
+                lessonId,
+              };
+              if (force) {
+                submitOptions.autoGate = false;
+                submitOptions.waitMs = 0;
+              }
+          """,
+              """      const submitOptions = {
+                startTime: status.startTime,
+                endTime: status.endTime,
+                forceRetry: shouldRetry,
+                lessonId,
+                autoGate: false,
+                waitMs: 0,
+              };
+              if (allowRetryAfterDeadline) submitOptions.allowRetryAfterDeadline = true;
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/auto-answer-runner.js',
+              """          if (verificationState === 'corrected' && verification?.answer !== undefined) {
+                    submission = await submitAnswer(problem, verification.answer, submitOptions);
+                    finalAnswer = verification.answer;
+                    finalAIContent = verification.aiAnswer ?? aiContent;
+                  } else if (verification?.aiAnswer !== undefined) {
+          """,
+              """          if (verificationState === 'corrected' && verification?.answer !== undefined) {
+                    try {
+                      const correctionSubmission = await submitAnswer(problem, verification.answer, submitOptions);
+                      submission = correctionSubmission;
+                      finalAnswer = verification.answer;
+                      finalAIContent = verification.aiAnswer ?? aiContent;
+                    } catch (error) {
+                      verificationState = 'correction-failed';
+                      console.warn('[雨课堂助手][WARN][AutoAnswer] 修正答案提交失败，保留首次成功提交:', error);
+                    }
+                  } else if (verification?.aiAnswer !== undefined) {
+          """,
+          )
+          replace_once(
+              'ykt-helper/src/state/auto-answer-runner.js',
+              """      const successDetail = verificationState === 'corrected'
+                ? '快速答案已提交，验证模型发现差异并完成修正。'
+                : (shouldRetry ? '答案已强制补交。' : undefined);
+              notify?.('auto-answer-succeeded', problem, successDetail, { source, submission, verificationState });
+              toast?.(shouldRetry ? 'AI 作答完成并已补交' : 'AI 作答完成', 3000);
+          """,
+              """      const usedRetry = submission?.route === 'retry';
+              const successDetail = verificationState === 'corrected'
+                ? '快速答案已提交，验证模型发现差异并完成修正。'
+                : (verificationState === 'correction-failed'
+                  ? '首次答案已成功提交，但复核修正提交失败，已保留首次答案。'
+                  : (usedRetry ? '答案已强制补交。' : undefined));
+              notify?.('auto-answer-succeeded', problem, successDetail, { source, submission, verificationState });
+              toast?.(usedRetry ? 'AI 作答完成并已补交' : 'AI 作答完成', 3000);
+          """,
+          )
+
+          policy_test = Path('ykt-helper/test/auto-answer-policy.test.js')
+          policy_test.write_text("""import assert from 'node:assert/strict';
+          import test from 'node:test';
+          import { shouldAutoAnswerForLesson } from '../src/core/auto-answer-policy.js';
+
+          test('global auto-answer enables any lesson', () => {
+            assert.equal(shouldAutoAnswerForLesson({ autoAnswer: true }, '1', {}), true);
+          });
+
+          test('auto-joined lesson follows the live autoAnswerOnAutoJoin switch', () => {
+            const state = { autoJoinedLessons: new Set(['42']), forceAutoAnswerLessons: new Set() };
+            assert.equal(shouldAutoAnswerForLesson({ autoAnswerOnAutoJoin: true }, 42, state), true);
+            assert.equal(shouldAutoAnswerForLesson({ autoAnswerOnAutoJoin: false }, 42, state), false);
+          });
+
+          test('explicit force set remains an independent override', () => {
+            const state = { autoJoinedLessons: new Set(), forceAutoAnswerLessons: new Set(['7']) };
+            assert.equal(shouldAutoAnswerForLesson({}, 7, state), true);
+          });
+          """, encoding='utf-8')
+          PY
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ykt-helper
+        run: npm ci
+
+      - name: Run full regression suite
+        working-directory: ykt-helper
+        run: npm test
+
+      - name: Build userscript
+        working-directory: ykt-helper
+        run: npm run build
+
+      - name: Commit only verified fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ykt-helper/src ykt-helper/test
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "fix: restore reliable auto-answer scheduling"
+          git push origin HEAD:fix/stability-auto-answer-20260916

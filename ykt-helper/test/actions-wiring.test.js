@@ -11,8 +11,13 @@ test('wires the auto-answer runner to the exported AI profile predicate', () => 
   );
 });
 
-test('marks timeline problem entries as historical before unlock handling', () => {
+test('classifies timeline entries before unlock handling instead of treating every timeline problem as historical', () => {
+  assert.match(actionsSource, /createTimelineProblemTracker/);
   assert.match(
+    actionsSource,
+    /onFetchTimeline\(timeline, options = \{\}\)[\s\S]*?timelineProblemTracker\.classify\(timeline, \{ lessonId \}\)[\s\S]*?this\.onUnlockProblem\(entry\.piece, \{ \.\.\.options, source: entry\.source \}\)/
+  );
+  assert.doesNotMatch(
     actionsSource,
     /onFetchTimeline\(timeline, options = \{\}\)[\s\S]*?this\.onUnlockProblem\(piece, \{\s*\.\.\.options, source: ['"]timeline['"] \}\)/
   );
@@ -24,5 +29,46 @@ test('keeps historical problem entries out of reminder and auto-answer paths', (
   assert.match(
     actionsSource,
     /if \(!isLiveUnlock\)[\s\S]*?return false;/
+  );
+});
+
+test('uses the per-lesson auto-answer policy instead of only the global switch', () => {
+  assert.match(actionsSource, /shouldAutoAnswerForLesson/);
+  assert.match(actionsSource, /const autoAnswerEnabled\s*=\s*shouldAutoAnswerForLesson/);
+  assert.match(
+    actionsSource,
+    /if \(autoAnswerEnabled && status\.autoAnswerQueued/
+  );
+});
+
+test('a live unlock re-arms a status previously hydrated by timeline replay', () => {
+  assert.match(
+    actionsSource,
+    /if \(isLiveUnlock && autoAnswerEnabled && !status\.done\)[\s\S]*?status\.autoAnswerQueued\s*=\s*true/
+  );
+});
+
+test('configuration changes start or stop auto-join immediately', () => {
+  assert.match(
+    actionsSource,
+    /ykt:auto-answer-config-changed[\s\S]*?ui\.config\.autoJoinEnabled[\s\S]*?actions\.maybeStartAutoJoin\(\)[\s\S]*?actions\.stopAutoJoinLoop\(\)/
+  );
+});
+
+test('stopping auto-join makes it restartable and closes managed classroom sockets', () => {
+  assert.match(
+    actionsSource,
+    /stopAutoJoinLoop\(\)[\s\S]*?_autoJoinStarted\s*=\s*false[\s\S]*?repo\.autoJoinedLessons[\s\S]*?markLessonDisconnected/
+  );
+});
+
+test('auto-joined lessons do not become permanent force-auto-answer lessons', () => {
+  assert.doesNotMatch(actionsSource, /repo\.forceAutoAnswerLessons\.add\(lessonId\)/);
+});
+
+test('successful background answers clear recovery state from the problem lesson', () => {
+  assert.match(
+    actionsSource,
+    /getProblemRecoveryStore\(status\?\.lessonId \|\| repo\.currentLessonId\)\?\.remove\(problemId\)/
   );
 });

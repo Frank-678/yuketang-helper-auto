@@ -303,7 +303,7 @@ function updateRow(row, e, prob){
       const { route } = await submitAnswer(
         { problemId: e.problemId, problemType: e.problemType },
         result,
-        { startTime, endTime }
+        { startTime, endTime, autoGate: false, waitMs: 0 }
       );
       ui.toast(route==='answer' ? '提交成功' : '补交成功');
       const merged = Object.assign({}, prob||{}, { result }, { status: { ...(prob?.status||{}), answered: true } });
@@ -319,7 +319,7 @@ function updateRow(row, e, prob){
             await submitAnswer(
               { problemId: e.problemId, problemType: e.problemType },
               result,
-              { startTime, endTime, forceRetry: true }
+              { startTime, endTime, forceRetry: true, autoGate: false, waitMs: 0 }
             );
             ui.toast('补交成功');
             const merged = Object.assign({}, prob||{}, { result }, { status: { ...(prob?.status||{}), answered: true } });
@@ -346,7 +346,7 @@ function updateRow(row, e, prob){
       await submitAnswer(
         { problemId: e.problemId, problemType: e.problemType },
         result,
-        { startTime, endTime, forceRetry: true }
+        { startTime, endTime, forceRetry: true, autoGate: false, waitMs: 0 }
       );
       ui.toast('补交成功');
       const merged = Object.assign({}, prob||{}, { result }, { status: { ...(prob?.status||{}), answered: true } });

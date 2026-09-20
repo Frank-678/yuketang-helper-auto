@@ -68,6 +68,27 @@ test('manual force runs AI and submits without the automatic wait gate', async (
   assert.equal(status.phase, 'done');
 });
 
+test('automatic runner does not apply a second answer delay before submission', async () => {
+  const { createAutoAnswerRunner } = await loadRunner();
+  const { calls, dependencies } = createRunnerHarness();
+  const runner = createAutoAnswerRunner(dependencies);
+  const problem = { problemId: 'problem-auto', problemType: 1, body: '1+1=?' };
+  const status = {
+    slideId: 'slide-auto',
+    startTime: 1_000,
+    endTime: 5_000,
+    phase: 'queued',
+    answering: false,
+    done: false,
+  };
+
+  const result = await runner.run(problem, status, { lessonId: 'lesson-auto' });
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.submit[0].options.autoGate, false);
+  assert.equal(calls.submit[0].options.waitMs, 0);
+});
+
 test('manual force uses the retry route when the deadline has passed', async () => {
   const { createAutoAnswerRunner } = await loadRunner();
   const { calls, dependencies } = createRunnerHarness({ now: () => 6_000 });
@@ -177,4 +198,70 @@ test('submits one correction when verification returns a different parsed answer
   assert.equal(calls.verification.firstRawAnswer, '答案: A');
   assert.deepEqual(result.answer, ['B']);
   assert.equal(result.aiAnswer, '答案: B');
+});
+
+test('keeps the first successful submission when verification correction cannot be submitted', async () => {
+  const { createAutoAnswerRunner } = await loadRunner();
+  let submitCount = 0;
+  const { calls, dependencies } = createRunnerHarness({
+    submitAnswer: async (problem, result, options) => {
+      calls.submit.push({ problem, result, options });
+      submitCount += 1;
+      if (submitCount === 2) throw new Error('correction rejected');
+      return { route: 'answer', resp: { code: 0 } };
+    },
+    verifyAnswer: async () => ({ state: 'corrected', answer: ['B'], aiAnswer: '答案: B' }),
+  });
+  const runner = createAutoAnswerRunner(dependencies);
+  const problem = { problemId: 'problem-correction-fail', problemType: 1, body: '1+1=?' };
+  const status = {
+    slideId: 'slide-correction',
+    startTime: 1_000,
+    endTime: 5_000,
+    phase: 'queued',
+    answering: false,
+    done: false,
+  };
+
+  const result = await runner.run(problem, status, { force: true, lessonId: 'lesson-correction' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.verificationState, 'correction-failed');
+  assert.deepEqual(result.answer, ['A']);
+  assert.equal(status.phase, 'done');
+  assert.equal(status.done, true);
+});
+
+
+test('untimed empty-result problems reach the answer runner', async () => {
+  const { createAutoAnswerRunner } = await loadRunner();
+  for (const result of [[], {}]) {
+    let submitted = 0;
+    const runner = createAutoAnswerRunner({
+      hasActiveProfile: () => false,
+      makeDefaultAnswer: () => ['A'],
+      submitAnswer: async () => { submitted += 1; return { route: 'answer' }; },
+    });
+    const problem = { problemId: 'untimed-empty-result', problemType: 1, result };
+    const status = { done: false, answering: false, endTime: null, phase: 'queued', autoAnswerTime: null };
+    const response = await runner.run(problem, status);
+    assert.equal(response.ok, true);
+    assert.equal(submitted, 1);
+  }
+});
+
+test('manual force with allowResubmit bypasses done status and existing result', async () => {
+  const { createAutoAnswerRunner } = await loadRunner();
+  let submitted = 0;
+  const runner = createAutoAnswerRunner({
+    hasActiveProfile: () => false,
+    makeDefaultAnswer: () => ['B'],
+    submitAnswer: async () => { submitted += 1; return { route: 'answer' }; },
+  });
+  const problem = { problemId: 'force-resubmit', problemType: 1, result: ['A'] };
+  const status = { done: true, answering: false, endTime: null, phase: 'done', autoAnswerTime: null };
+  const response = await runner.run(problem, status, { force: true, allowResubmit: true, source: 'manual' });
+  assert.equal(response.ok, true);
+  assert.equal(submitted, 1);
+  assert.deepEqual(response.answer, ['B']);
 });

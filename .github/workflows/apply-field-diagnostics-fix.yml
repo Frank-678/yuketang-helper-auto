@@ -1,0 +1,77 @@
+name: Apply Field Diagnostics Fix
+
+on:
+  push:
+    branches:
+      - fix/stability-auto-answer-20260916
+    paths:
+      - '.github/workflows/apply-field-diagnostics-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-build-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/stability-auto-answer-20260916
+          fetch-depth: 0
+
+      - name: Apply deterministic field diagnostics fix
+        run: python3 .github/scripts/apply-field-diagnostics-fix.py
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ykt-helper
+        run: npm ci
+
+      - name: Run full regression suite
+        working-directory: ykt-helper
+        run: npm test
+
+      - name: Build userscript
+        working-directory: ykt-helper
+        run: npm run build
+
+      - name: Prepare 1.21.6.3 field-test userscript
+        shell: bash
+        run: |
+          cp ykt-helper/dist/ykt-helper-1216.user.js release/ykt-helper-1216-stability-test.user.js
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('release/ykt-helper-1216-stability-test.user.js')
+          text = p.read_text(encoding='utf-8')
+          for old in ('// @version      1.21.6.2', '// @version      1.21.6'):
+              if old in text:
+                  text = text.replace(old, '// @version      1.21.6.3', 1)
+                  break
+          else:
+              raise SystemExit('Expected 1.21.6 or 1.21.6.2 version header')
+          p.write_text(text, encoding='utf-8')
+          PY
+          test -s release/ykt-helper-1216-stability-test.user.js
+          grep -q '// @version      1.21.6.3' release/ykt-helper-1216-stability-test.user.js
+          grep -q 'LIVE_UNLOCK_RETRY_LIMIT' release/ykt-helper-1216-stability-test.user.js
+          grep -q '自动作答未启动' release/ykt-helper-1216-stability-test.user.js
+          grep -q '弹幕自动跟发失败' release/ykt-helper-1216-stability-test.user.js
+          grep -q '\[雨课堂助手\]\[INFO\]\[AutoAnswer\] 开始作答' release/ykt-helper-1216-stability-test.user.js
+
+      - name: Commit only verified source and field-test artifact
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ykt-helper/src release/ykt-helper-1216-stability-test.user.js
+          git diff --cached --check -- ykt-helper/src
+          git diff --cached --stat
+          git commit -m "fix: retry live unlock hydration and expose field diagnostics"
+          git push origin HEAD:fix/stability-auto-answer-20260916
