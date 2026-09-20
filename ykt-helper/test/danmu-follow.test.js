@@ -15,7 +15,7 @@ function tracker(options = {}) {
   ));
 }
 
-test('reports a new round only after an adjacent gap of at least one minute', async () => {
+test('reports a new round after either a one-minute hard duration or a one-minute adjacent gap', async () => {
   const { createDanmuRoundTracker } = await loadDanmuFollow();
   const rounds = createDanmuRoundTracker({ roundGapMs: 60_000 });
 
@@ -29,17 +29,25 @@ test('reports a new round only after an adjacent gap of at least one minute', as
     roundNumber: 1,
     at: 59_999,
   });
-  assert.deepEqual(rounds.observe(119_998), {
-    roundStarted: false,
-    roundNumber: 1,
-    at: 119_998,
-  });
-  assert.deepEqual(rounds.observe(179_998), {
+  assert.deepEqual(rounds.observe(60_000), {
     roundStarted: true,
     roundNumber: 2,
-    at: 179_998,
+    at: 60_000,
   });
-  assert.equal(rounds.observe(239_997).roundStarted, false);
+  assert.equal(rounds.observe(119_999).roundStarted, false);
+  assert.deepEqual(rounds.observe(120_000), {
+    roundStarted: true,
+    roundNumber: 3,
+    at: 120_000,
+  });
+
+  rounds.reset();
+  rounds.observe(0);
+  assert.deepEqual(rounds.observe(60_001), {
+    roundStarted: true,
+    roundNumber: 2,
+    at: 60_001,
+  });
 });
 
 test('emits a round-start callback even when automatic following is disabled', async () => {

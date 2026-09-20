@@ -1,5 +1,5 @@
 // src/ui/panels/auto-answer-popup.js
-import { ui } from '../ui-api.js';
+import { ui } from '../ui-context.js';
 
 // 简单 HTML 转义
 function esc(s) {

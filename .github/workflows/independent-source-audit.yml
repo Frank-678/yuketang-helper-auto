@@ -1,0 +1,141 @@
+name: Independent Source Audit
+
+on:
+  pull_request:
+    paths:
+      - 'ykt-helper/**'
+      - '.github/workflows/independent-source-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: independent-source-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  existing-regression:
+    name: Re-run complete project regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Run all existing tests and build contracts
+        run: npm run test:all
+
+  fault-injection:
+    name: Failure-path fault injection
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run independent fault-injection tests
+        run: node --test test/audit/*.audit.test.mjs
+
+  syntax-and-import-graph:
+    name: Syntax and circular import graph
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Parse every production JavaScript module
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find src -type f -name '*.js' -print0)
+      - name: Detect circular ESM imports independently
+        run: npx --yes madge@8.0.0 --circular --extensions js src/index.js
+
+  architecture-boundary:
+    name: Network/state architecture boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject direct interceptor-to-actions coupling
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -REn "from ['\"]\.\./state/actions\.js['\"]" src/net; then
+            echo 'Network interceptors must dispatch through runtime-dispatch, not import actions directly.' >&2
+            exit 1
+          fi
+
+  source-security-smoke:
+    name: Source security smoke checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject obvious embedded credentials in production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -REn '(sk-[A-Za-z0-9_-]{24,}|AIza[0-9A-Za-z_-]{30,}|gh[pousr]_[A-Za-z0-9]{30,})' src userscript.meta.js; then
+            echo 'Potential credential material detected in production source.' >&2
+            exit 1
+          fi
+      - name: Reject eval-style dynamic code execution in production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -REn '(^|[^A-Za-z0-9_$])(eval|Function)[[:space:]]*\(' src; then
+            echo 'Dynamic code execution primitive detected in production source.' >&2
+            exit 1
+          fi
+      - name: Inventory remote runtime resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -REno "https://[^'\" )]+" src userscript.meta.js | sort -u | tee /tmp/remote-resources.txt || true
+          test -s /tmp/remote-resources.txt
+
+  codeql:
+    name: CodeQL JavaScript analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:javascript-typescript'

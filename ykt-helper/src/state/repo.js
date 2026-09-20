@@ -89,22 +89,51 @@ export const repo = {
     return socket;
   },
 
-  markLessonDisconnected(lessonId, reason = 'closed') {
+  markLessonDisconnected(lessonId, reason = 'closed', expectedSocket = null) {
     const key = String(lessonId || '').trim();
     if (!key) return null;
-    const socket = this.lessonSockets.get(key) || null;
+    const currentSocket = this.lessonSockets.get(key) || null;
+
+    // A close/error callback can arrive after another socket has already taken
+    // ownership of the same lesson. Only the current owner may clear shared
+    // lesson state when a caller provides the socket it is cleaning up.
+    if (expectedSocket && currentSocket !== expectedSocket) {
+      return {
+        lessonId: key,
+        reason: 'stale-owner',
+        requestedReason: reason,
+        socket: expectedSocket,
+        currentSocket,
+        disconnected: false,
+      };
+    }
+
     this.lessonSockets.delete(key);
     this.lessonTokens.delete(key);
     this.listeningLessons.delete(key);
     this.autoJoinedLessons.delete(key);
     this.forceAutoAnswerLessons.delete(key);
-    return { lessonId: key, reason, socket };
+    return {
+      lessonId: key,
+      reason,
+      socket: currentSocket,
+      disconnected: true,
+    };
   },
 
   markLessonAutoJoined(lessonId, enabled = true) {
     const key = String(lessonId || '').trim();
-    if (!key) return;
-    if (enabled) this.autoJoinedLessons.add(key);
-    else this.autoJoinedLessons.delete(key);
+    if (!key) return false;
+    if (enabled) {
+      const socket = this.lessonSockets.get(key) || null;
+      // Foreground/native sockets explicitly opt out of AutoJoin ownership.
+      // Undefined keeps compatibility with legacy/plain test doubles while the
+      // managed WS path marks its socket with __yktManaged === true.
+      if (socket?.__yktManaged === false) return false;
+      this.autoJoinedLessons.add(key);
+      return true;
+    }
+    this.autoJoinedLessons.delete(key);
+    return true;
   },
 };

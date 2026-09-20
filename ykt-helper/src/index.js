@@ -6,33 +6,9 @@ import { injectStyles } from './ui/styles.js';
 import { installToolbar } from './ui/toolbar.js';
 import { actions } from './state/actions.js';
 import { ui } from './ui/ui-api.js'; 
-import { gm } from './core/env.js';
+import { gm, ensureFontAwesome } from './core/env.js';
 import { getRuntimeMode, installDesktopRouteGuard, shouldStartDesktopRuntime } from './core/runtime-mode.js';
 
-function loadFA() {
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';
-  document.head.appendChild(link);
-}
-
-function maybeAutoReloadOnMount() {
-  try {
-    // If the script is mounted after DOM is already ready, reload once so XHR/WS interceptors can arm early.
-    // Guarded by sessionStorage to avoid infinite reload loops.
-    const key = '__ykt_helper_auto_reload_once__';
-    if (document.readyState === 'loading') return false;
-    if (!window.sessionStorage) return false;
-    if (window.sessionStorage.getItem(key) === '1') return false;
-
-    window.sessionStorage.setItem(key, '1');
-    console.log('[YKT-Helper][INFO] Late mount detected; reloading once to arm interceptors.');
-    window.setTimeout(() => window.location.reload(), 50);
-    return true;
-  } catch {
-    return false;
-  }
-}
 let periodicReloadTimer = null;
 
 function startPeriodicReload(opts = {}) {
@@ -44,28 +20,28 @@ function startPeriodicReload(opts = {}) {
 
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
 
-      periodicReloadTimer = window.setInterval(() => {
-    try {
-      console.log('[雨课堂助手]][DEBUG] periodic tick', {
-        pathname: window.location.pathname,
-        hidden: document.hidden
-      });
+    periodicReloadTimer = window.setInterval(() => {
+      try {
+        console.log('[雨课堂助手][DEBUG] periodic tick', {
+          pathname: window.location.pathname,
+          hidden: document.hidden,
+        });
 
-      if (skipLessonPages && /\/lesson\//.test(window.location.pathname)) {
-        console.log('[雨课堂助手][DEBUG] skip reload: lesson page');
-        return;
-      }
-      if (onlyWhenHidden && !document.hidden) {
-        console.log('[雨课堂助手][DEBUG] skip reload: page visible');
-        return;
-      }
+        if (skipLessonPages && /\/lesson\//.test(window.location.pathname)) {
+          console.log('[雨课堂助手][DEBUG] skip reload: lesson page');
+          return;
+        }
+        if (onlyWhenHidden && !document.hidden) {
+          console.log('[雨课堂助手][DEBUG] skip reload: page visible');
+          return;
+        }
 
-      console.log('[雨课堂助手][INFO] Periodic reload triggered to avoid zombie session.');
-      window.location.reload();
-    } catch (e) {
-      console.error(e);
-    }
-  }, intervalMs);
+        console.log('[雨课堂助手][INFO] Periodic reload triggered to avoid zombie session.');
+        window.location.reload();
+      } catch (e) {
+        console.error(e);
+      }
+    }, intervalMs);
     return periodicReloadTimer;
   } catch {
     return null;
@@ -78,12 +54,10 @@ let runtimeBootQueued = false;
 function startDesktopRuntime() {
   if (desktopStarted) return;
   desktopStarted = true;
-  if (maybeAutoReloadOnMount()) return;
 
-  loadFA();
+  ensureFontAwesome();
   injectStyles();
   ui._mountAll?.();
-  installXHRInterceptor();
   installToolbar();
   actions.startAutoAnswerLoop();
   actions.launchLessonHelper();
@@ -134,14 +108,17 @@ function installRuntimeRouteWatcher() {
   });
   if (guard.redirected || guard.reason === 'loop-prevented') return;
 
+  // Base services must be armed on the first userscript execution. Network
+  // interception must not depend on a second page load or on UI/runtime mount.
+  installWSInterceptor({
+    getRuntimeMode: () => getRuntimeMode(window.location.pathname),
+  });
+  installXHRInterceptor();
+
   // Periodic refresh is a base service, not a desktop-runtime side effect.
   // It keeps running across SPA route changes, but each tick still skips /lesson/ pages.
   startPeriodicReload({ intervalMs: 1 * 60 * 1000, onlyWhenHidden: false, skipLessonPages: true });
 
-  // WebSocket needs to be patched at document-start.
-  installWSInterceptor({
-    getRuntimeMode: () => getRuntimeMode(window.location.pathname),
-  });
   installRuntimeRouteWatcher();
   queueRuntimeBoot();
 })();

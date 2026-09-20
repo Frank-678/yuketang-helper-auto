@@ -1,10 +1,14 @@
 import tpl from './presentation.html';
-import { ui } from '../ui-api.js';
+import { ui } from '../ui-context.js';
 import { repo } from '../../state/repo.js';
 import { actions } from '../../state/actions.js';
 import { ensureHtml2Canvas, ensureJsPDF } from '../../core/env.js';
 import { captureSlideImage } from '../../capture/screenshoot.js';
 import { queryOCRVision, queryTranslationText } from '../../ai/openai.js';
+import { emitInternalEvent } from '../../core/internal-events.js';
+import { trustedUiHandler } from '../../core/trusted-ui-event.js';
+import { getFiniteDeadline, isProblemExpired } from '../../core/problem-view-state.js';
+import { hasSubmittedAnswer } from '../../core/answer-state.js';
 
 let mounted = false;
 let host;
@@ -13,6 +17,7 @@ const selectedSlideIds = new Set();
 const ocrResults = new Map();
 const translationResults = new Map();
 let currentResultMode = 'original';
+let staticDomObserverInstalled = false;
 function findSlideAcrossPresentations(idStr) {
   for (const [, pres] of repo.presentations) { const arr = pres?.slides || []; const hit = arr.find(s => String(s.id) === idStr); if (hit) return hit; }
   return null;
@@ -695,10 +700,10 @@ export function mountPresentationPanel() {
   $('#ykt-presentation-close')?.addEventListener('click', () => showPresentationPanel(false));
   $('#ykt-open-problem-list')?.addEventListener('click', () => {
     showPresentationPanel(false);
-    window.dispatchEvent(new CustomEvent('ykt:open-problem-list'));
+    emitInternalEvent('open-problem-list');
   });
 
-  $('#ykt-ask-current')?.addEventListener('click', () => {
+  $('#ykt-ask-current')?.addEventListener('click', trustedUiHandler(() => {
     if (selectedSlideIds.size > 0) {
       const slides = [];
       for (const sid of selectedSlideIds) {
@@ -708,10 +713,8 @@ export function mountPresentationPanel() {
       }
       L('点击“提问当前PPT”(多选)', { selectedCount: selectedSlideIds.size, slidesCount: slides.length });
       if (slides.length === 0) return ui.toast('所选页面无可用图片', 2500);
-      window.dispatchEvent(new CustomEvent('ykt:ask-ai-for-slides', {
-        detail: { slides, source: 'manual' }
-      }));
-      window.dispatchEvent(new CustomEvent('ykt:open-ai'));
+      emitInternalEvent('ask-ai-for-slides', { slides, source: 'manual' });
+      emitInternalEvent('open-ai');
       return;
     }
 
@@ -721,15 +724,13 @@ export function mountPresentationPanel() {
     L('点击“提问当前PPT”', { currentSlideId: sid, lookupHit: lookup.hit, hasSlide: !!lookup.slide });
     if (!sid) return ui.toast('请先在左侧选择一页PPT', 2500);
     const imageUrl = getSlideImageUrl(lookup.slide);
-    window.dispatchEvent(new CustomEvent('ykt:ask-ai-for-slide', {
-      detail: { slideId: sid, imageUrl }
-    }));
-    window.dispatchEvent(new CustomEvent('ykt:open-ai'));
-  });
+    emitInternalEvent('ask-ai-for-slide', { slideId: sid, imageUrl });
+    emitInternalEvent('open-ai');
+  }));
 
   $('#ykt-download-current')?.addEventListener('click', downloadCurrentSlide);
-  $('#ykt-ocr-current')?.addEventListener('click', recognizeCurrentSlideText);
-  $('#ykt-translate-toggle')?.addEventListener('click', translateCurrentOCRText);
+  $('#ykt-ocr-current')?.addEventListener('click', trustedUiHandler(recognizeCurrentSlideText));
+  $('#ykt-translate-toggle')?.addEventListener('click', trustedUiHandler(translateCurrentOCRText));
   $('#ykt-download-pdf')?.addEventListener('click', downloadPresentationPDF);
 
   const translateTargetInput = getTranslateTargetInput();
@@ -745,8 +746,14 @@ export function mountPresentationPanel() {
   const cb = $('#ykt-show-all-slides');
   cb.checked = !!ui.config.showAllSlides;
   cb.addEventListener('change', () => {
+    const previousValue = !!ui.config.showAllSlides;
     ui.config.showAllSlides = !!cb.checked;
-    ui.saveConfig();
+    if (ui.saveConfig() === false) {
+      ui.config.showAllSlides = previousValue;
+      cb.checked = previousValue;
+      ui.toast('设置保存失败，修改未应用', 4000);
+      return;
+    }
     L('切换 showAllSlides =', ui.config.showAllSlides);
     updatePresentationList();
   });
@@ -780,8 +787,8 @@ export function updatePresentationList() {
     W('[static-report] 检测/注入失败：', e);
   }
 
-  if (!window.__ykt_static_dom_mo) {
-    window.__ykt_static_dom_mo = true;
+  if (!staticDomObserverInstalled) {
+    staticDomObserverInstalled = true;
     let times = 0;
 
     const mo = new MutationObserver(() => {
@@ -860,10 +867,16 @@ export function updatePresentationList() {
 
     const titleEl = document.createElement('div');
     titleEl.className = 'presentation-title';
-    titleEl.innerHTML = `
-      <span>${presentation.title || `课件 ${id}`}</span>
-      <i class="fas fa-download download-btn" title="下载课件"></i>
-    `;
+
+    const titleText = document.createElement('span');
+    titleText.textContent = presentation.title || `课件 ${id}`;
+    titleEl.appendChild(titleText);
+
+    const downloadIcon = document.createElement('i');
+    downloadIcon.className = 'fas fa-download download-btn';
+    downloadIcon.setAttribute('title', '下载课件');
+    titleEl.appendChild(downloadIcon);
+
     cont.appendChild(titleEl);
 
     titleEl.querySelector('.download-btn')?.addEventListener('click', (e) => {
@@ -901,7 +914,7 @@ export function updatePresentationList() {
         const pid = s.problem.problemId;
         const status = repo.problemStatus.get(pid);
         if (status) thumb.classList.add('unlocked');
-        if (s.problem.result) thumb.classList.add('answered');
+        if (hasSubmittedAnswer(s.problem.result)) thumb.classList.add('answered');
       }
 
       thumb.addEventListener('click', (ev) => {
@@ -946,7 +959,7 @@ export function updatePresentationList() {
 
         const detail = { slideId: slideIdStr, presentationId: presIdStr };
         L('派发事件 ykt:presentation:slide-selected', detail);
-        window.dispatchEvent(new CustomEvent('ykt:presentation:slide-selected', { detail }));
+        emitInternalEvent('presentation:slide-selected', detail);
 
         L('调用 actions.navigateTo ->', { presIdStr, slideIdStr });
         actions.navigateTo(presIdStr, slideIdStr);
@@ -1056,11 +1069,11 @@ export function updateSlideView() {
     const forceAI = document.createElement('button');
     forceAI.type = 'button';
     forceAI.textContent = 'AI 强制作答';
-    forceAI.addEventListener('click', async (ev) => {
+    forceAI.addEventListener('click', trustedUiHandler(async (ev) => {
       ev.stopPropagation();
       const status = repo.problemStatus.get(String(prob.problemId)) || repo.problemStatus.get(prob.problemId);
-      const endTime = Number(status?.endTime ?? prob.endTime);
-      const expired = Number.isFinite(endTime) && Date.now() >= endTime;
+      const endTime = getFiniteDeadline(status?.endTime, prob.endTime);
+      const expired = isProblemExpired(Date.now(), endTime);
       if (expired && !window.confirm('这道题已过截止时间，AI 将使用强制补交接口。继续吗？')) return;
       forceAI.disabled = true;
       try {
@@ -1070,7 +1083,7 @@ export function updateSlideView() {
         forceAI.disabled = false;
         updateSlideView();
       }
-    });
+    }));
     problemActions.appendChild(forceAI);
 
     const editAnswer = document.createElement('button');
@@ -1078,7 +1091,7 @@ export function updateSlideView() {
     editAnswer.textContent = '编辑/补交';
     editAnswer.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      window.dispatchEvent(new CustomEvent('ykt:open-problem-list', { detail: { problemId: prob.problemId } }));
+      emitInternalEvent('open-problem-list', { problemId: prob.problemId });
     });
     problemActions.appendChild(editAnswer);
     box.appendChild(problemActions);

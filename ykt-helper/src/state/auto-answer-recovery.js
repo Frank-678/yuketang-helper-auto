@@ -149,7 +149,11 @@ export function createProblemRecoveryStore({
       : (raw && typeof raw === 'object' ? Object.values(raw) : []);
     records = new Map();
     for (const input of entries) {
-      const record = normalizeRecoveryRecord(input, { lessonId: lesson, now: Number(now()) });
+      // Preserve an explicit stored lesson id so prune() can detect records
+      // accidentally written under the wrong lesson storage key. Legacy
+      // records without lessonId still inherit the current store lesson.
+      const recordLessonId = asId(input?.lessonId) || lesson;
+      const record = normalizeRecoveryRecord(input, { lessonId: recordLessonId, now: Number(now()) });
       if (record) records.set(record.problemId, record);
     }
     if (prune()) persist();

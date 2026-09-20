@@ -32,31 +32,26 @@ export const gm = {
   uw: window.unsafeWindow || window,
 };
 
-export function loadScriptOnce(src) {
-  return new Promise((resolve, reject) => {
-    if ([...document.scripts].some(s => s.src === src)) return resolve();
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load: ${src}`));
-    document.head.appendChild(s);
-  });
+function runtimeGlobal(name) {
+  const candidates = [globalThis, window, gm.uw].filter(Boolean);
+  for (const candidate of candidates) {
+    const value = candidate?.[name];
+    if (value != null) return value;
+  }
+  return undefined;
 }
 
 export async function ensureHtml2Canvas() {
-  const w = gm.uw || window;                         
-  if (typeof w.html2canvas === 'function') return w.html2canvas;
-  await loadScriptOnce('https://html2canvas.hertzen.com/dist/html2canvas.min.js');
-  const h2c = w.html2canvas?.default || w.html2canvas;
+  const raw = runtimeGlobal('html2canvas');
+  const h2c = raw?.default || raw;
   if (typeof h2c === 'function') return h2c;
-  throw new Error('html2canvas 未正确加载');
+  throw new Error('html2canvas 固定依赖未加载或不可用');
 }
 
 export async function ensureJsPDF() {
-  if (window.jspdf?.jsPDF) return window.jspdf;
-  await loadScriptOnce('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
-  if (!window.jspdf?.jsPDF) throw new Error('jsPDF 未加载成功');
-  return window.jspdf;
+  const raw = runtimeGlobal('jspdf');
+  if (raw?.jsPDF) return raw;
+  throw new Error('jsPDF 固定依赖未加载或不可用');
 }
 
 export function randInt(l, r) {
@@ -69,5 +64,8 @@ export async function ensureFontAwesome() {
   const link = document.createElement('link');
   link.rel = 'stylesheet';
   link.href = href;
+  link.integrity = 'sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==';
+  link.crossOrigin = 'anonymous';
+  link.referrerPolicy = 'no-referrer';
   document.head.appendChild(link);
 }

@@ -3,7 +3,7 @@ import { PROBLEM_TYPE_MAP } from '../core/types.js';
 import { randInt, gm } from '../core/env.js'
 import { storage } from '../core/storage.js';
 import { repo } from './repo.js';
-import { ui } from '../ui/ui-api.js';
+import { ui } from '../ui/ui-context.js';
 import { submitAnswer, retryAnswer } from '../tsm/answer.js';;
 import { queryAI, queryAIVision} from '../ai/openai.js';
 import { showAutoAnswerPopup } from '../ui/panels/auto-answer-popup.js';
@@ -27,6 +27,9 @@ import { isLiveProblemSource } from '../core/problem-event-source.js';
 import { createTimelineProblemTracker } from '../core/timeline-problem-tracker.js';
 import { syncActiveLessons, getLessonId } from '../core/active-lessons.js';
 import { createNavigationArbiter, pickLatestActiveLesson } from '../core/navigation-arbiter.js';
+import { shouldAutoAnswerForLesson as evaluateAutoAnswerPolicy } from '../core/auto-answer-policy.js';
+import { registerRuntimeActions } from '../core/runtime-dispatch.js';
+import { onInternalEvent } from '../core/internal-events.js';
 
 let _autoLoopStarted = false;
 let _autoJoinStarted = false;
@@ -90,12 +93,12 @@ function currentPageLessonId() {
 }
 
 function shouldAutoAnswerForLesson(lessonId) {
-  if (ui?.config?.autoAnswer === true) return true;
-  const key = String(lessonId || '').trim();
-  if (!key) return false;
-  if (repo?.autoJoinedLessons?.has(key) && ui?.config?.autoAnswerOnAutoJoin === true) return true;
-  if (repo?.forceAutoAnswerLessons?.has(key)) return true;
-  return false;
+  return evaluateAutoAnswerPolicy({
+    lessonId,
+    config: ui?.config,
+    autoJoinedLessons: repo?.autoJoinedLessons,
+    forceAutoAnswerLessons: repo?.forceAutoAnswerLessons,
+  });
 }
 
 const AUTO_ANSWER_EVENT_META = {
@@ -228,7 +231,7 @@ function statusPhase(status) {
 function persistProblemStatus(problemId, status, problem = getProblemById(problemId)) {
   const store = getProblemRecoveryStore(status?.lessonId || repo.currentLessonId);
   if (!store || !status) return;
-  if (status.done || problem?.result) {
+  if (status.done || hasSubmittedAnswer(problem?.result)) {
     store.remove(problemId);
     return;
   }
@@ -361,13 +364,11 @@ function restorePendingProblemStatuses() {
   return restored;
 }
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('ykt:auto-answer-config-changed', () => {
-    restorePendingProblemStatuses();
-    if (ui.config.autoJoinEnabled) actions.maybeStartAutoJoin();
-    else actions.stopAutoJoinLoop();
-  });
-}
+onInternalEvent('auto-answer-config-changed', () => {
+  restorePendingProblemStatuses();
+  if (ui.config.autoJoinEnabled) actions.maybeStartAutoJoin();
+  else actions.stopAutoJoinLoop();
+});
 
 export function hasActiveAIProfile(aiCfg, selectedProfile = null) {
   if (selectedProfile) return !!selectedProfile.apiKey;
@@ -901,7 +902,13 @@ export const actions = {
 
         for (const staleLessonId of snapshot.removed) {
           const staleSocket = repo.lessonSockets.get(staleLessonId);
-          repo.markLessonDisconnected(staleLessonId, 'inactive');
+          if (staleSocket?.__yktManaged === false) {
+            // The AutoJoin API snapshot no longer owns this lesson. A foreground
+            // classroom still owns its native socket, so background pruning must
+            // not disconnect or close that connection.
+            continue;
+          }
+          repo.markLessonDisconnected(staleLessonId, 'inactive', staleSocket || null);
           try { staleSocket?.close?.(); } catch {}
         }
 
@@ -1079,3 +1086,5 @@ export const actions = {
     });
   },
 };
+
+registerRuntimeActions(actions);

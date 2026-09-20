@@ -1,5 +1,6 @@
 // src/ai/kimi.js
 import { gm } from '../core/env.js';
+import { assertSafeApiEndpoint } from '../core/remote-endpoint.js';
 
 // 将后端 problemType 数字映射为 Step1/Step2 使用的 question_type 字符串
 // 约定：
@@ -46,7 +47,25 @@ function getActiveProfile(aiCfg, profileId = null) {
 function makeChatUrl(profile) {
 //   const base = (profile.baseUrl || 'https://api.moonshot.cn').replace(/\/+$/,'');
 //   return `${base}/v1/chat/completions`;   
-    return profile.baseUrl;
+    return assertSafeApiEndpoint(profile.baseUrl);
+}
+
+function sameEndpointOrigin(left, right) {
+  const a = new URL(assertSafeApiEndpoint(left));
+  const b = new URL(assertSafeApiEndpoint(right));
+  return a.origin === b.origin;
+}
+
+function resolveServiceApiKey(label, dedicatedKey, serviceUrl, baseProfile) {
+  const ownKey = String(dedicatedKey || '').trim();
+  if (ownKey) return ownKey;
+  const baseKey = String(baseProfile?.apiKey || '').trim();
+  if (!baseKey) return '';
+  const target = String(serviceUrl || '').trim();
+  if (target && !sameEndpointOrigin(target, baseProfile?.baseUrl)) {
+    throw new Error(`${label} 使用不同 API endpoint 时必须配置专用 API Key`);
+  }
+  return baseKey;
 }
 
 function withProfileTemperature(profile, payload) {
@@ -90,6 +109,145 @@ const VISION_GUIDE = [
   'C. 否则参考用户输入回答',
 ].join('\n');
 
+const DEFAULT_AI_REQUEST_TIMEOUT_MS = 120000;
+
+function resolveAIRequestTimeout(aiCfg, override) {
+  const raw = override ?? aiCfg?.requestTimeoutMs ?? DEFAULT_AI_REQUEST_TIMEOUT_MS;
+  const timeout = Number(raw);
+  if (!Number.isFinite(timeout) || timeout <= 0) return DEFAULT_AI_REQUEST_TIMEOUT_MS;
+  return Math.max(10000, Math.min(300000, timeout));
+}
+
+function isAITimeoutError(error) {
+  return /超时|timeout/i.test(String(error?.message || error || ''));
+}
+
+const AI_RATE_LIMIT_MAX_RETRIES = 2;
+const aiRequestQueues = new Map();
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function requestQueueKey(profile) {
+  const url = new URL(makeChatUrl(profile));
+  // The API key is already present in runtime memory.  Keeping it only as an
+  // in-memory Map key lets profiles that share one account also share one
+  // concurrency slot without logging or persisting the credential.
+  return `${url.origin}\n${String(profile?.apiKey || '')}`;
+}
+
+async function withAIRequestSlot(profile, task) {
+  const key = requestQueueKey(profile);
+  const previous = aiRequestQueues.get(key) || Promise.resolve();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const tail = previous.catch(() => {}).then(() => gate);
+  aiRequestQueues.set(key, tail);
+
+  await previous.catch(() => {});
+  try {
+    return await task();
+  } finally {
+    release();
+    if (aiRequestQueues.get(key) === tail) aiRequestQueues.delete(key);
+  }
+}
+
+function retryAfterMs(response) {
+  const headers = String(response?.responseHeaders || '');
+  const headerMatch = headers.match(/(?:^|\r?\n)retry-after:\s*([0-9.]+)/i);
+  if (headerMatch) {
+    const seconds = Number(headerMatch[1]);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(10000, seconds * 1000);
+  }
+
+  try {
+    const body = JSON.parse(String(response?.responseText || '{}'));
+    const message = String(body?.error?.message || body?.message || '');
+    const match = message.match(/after\s+([0-9.]+)\s*(milliseconds?|ms|seconds?|s)\b/i);
+    if (match) {
+      const amount = Number(match[1]);
+      if (Number.isFinite(amount) && amount >= 0) {
+        const isMs = /^m/i.test(match[2]);
+        return Math.min(10000, isMs ? amount : amount * 1000);
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+function httpErrorFromResponse(response) {
+  const status = Number(response?.status);
+  let message = `AI 请求失败: ${status || 'unknown'}`;
+  let code = null;
+  try {
+    const data = JSON.parse(String(response?.responseText || '{}'));
+    if (data?.error?.message) message += ` - ${data.error.message}`;
+    else if (data?.message) message += ` - ${data.message}`;
+    if (data?.error?.code) {
+      code = data.error.code;
+      message += ` (${code})`;
+    }
+  } catch {
+    const raw = String(response?.responseText || '').trim();
+    if (raw) message += ` - ${raw}`;
+  }
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  error.retryAfterMs = retryAfterMs(response);
+  return error;
+}
+
+function requestChatCompletion(profile, payload, debugLabel, timeoutMs) {
+  const url = makeChatUrl(profile);
+  return withAIRequestSlot(profile, async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await new Promise((resolve, reject) => {
+          gm.xhr({
+            method: 'POST',
+            url,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${profile.apiKey}`,
+            },
+            data: JSON.stringify(withProfileTemperature(profile, payload)),
+            timeout: timeoutMs,
+            onload: (res) => {
+              try {
+                console.log(`[雨课堂助手]${debugLabel} Status:`, res.status);
+                if (Number(res.status) !== 200) {
+                  reject(httpErrorFromResponse(res));
+                  return;
+                }
+                resolve(JSON.parse(res.responseText));
+              } catch (error) {
+                reject(new Error(`解析API响应失败: ${error.message}`));
+              }
+            },
+            onerror: () => reject(new Error('网络请求失败')),
+            ontimeout: () => reject(new Error('AI 请求超时')),
+          });
+        });
+      } catch (error) {
+        const rateLimited = Number(error?.status) === 429;
+        if (!rateLimited || attempt >= AI_RATE_LIMIT_MAX_RETRIES) throw error;
+        const waitMs = Number.isFinite(error?.retryAfterMs)
+          ? Math.max(0, error.retryAfterMs)
+          : Math.min(4000, 1000 * (attempt + 1));
+        console.warn('[雨课堂助手][WARN][AI] 429 并发/限流，等待后重试', {
+          attempt: attempt + 1,
+          waitMs,
+        });
+        await sleep(waitMs);
+      }
+    }
+  });
+}
+
 
 
 /**
@@ -101,113 +259,46 @@ export async function queryAI(question, aiCfg, options = {}) {
     throw new Error('请先在设置中配置 AI API Key');
   }
 
-  const url = makeChatUrl(profile);
-  const model = profile.model || 'gpt-4o-mini'; // 默认给一个合理值
+  const model = profile.model || 'gpt-4o-mini';
+  const timeoutMs = resolveAIRequestTimeout(aiCfg, options?.timeout);
+  const data = await requestChatCompletion(
+    profile,
+    {
+      model,
+      messages: [
+        { role: 'system', content: BASE_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: [
+                '【文本模式说明】可能为题目文本，也可能为普通问答。请先执行决策闸，再回答。',
+                '【用户输入（优先级最高）】',
+                question || '（无）',
+              ].join('\n'),
+            },
+          ],
+        },
+      ],
+    },
+    '[AI OpenAI]',
+    timeoutMs,
+  );
 
-  return new Promise((resolve, reject) => {
-    gm.xhr({
-      method: 'POST',
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${profile.apiKey}`,
-      },
-      data: JSON.stringify(withProfileTemperature(profile, {
-        model,
-        messages: [
-          { role: 'system', content: BASE_SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: [
-                  '【文本模式说明】可能为题目文本，也可能为普通问答。请先执行决策闸，再回答。',
-                  '【用户输入（优先级最高）】',
-                  question || '（无）',
-                ].join('\n'),
-              },
-            ],
-          },
-        ],
-      })),
-      onload: (res) => {
-        try {
-          console.log('[雨课堂助手][AI OpenAI] Status:', res.status);
-          console.log('[雨课堂助手][AI OpenAI] Response:', res.responseText);
-
-          if (res.status !== 200) {
-            reject(new Error(`AI 接口请求失败: ${res.status}`));
-            return;
-          }
-          const data = JSON.parse(res.responseText);
-          const content = data.choices?.[0]?.message?.content;
-          if (content) resolve(content);
-          else reject(new Error('AI返回内容为空'));
-        } catch (e) {
-          reject(new Error(`解析API响应失败: ${e.message}`));
-        }
-      },
-      onerror: () => reject(new Error('网络请求失败')),
-      timeout: 30000,
-    });
-  });
+  const content = data.choices?.[0]?.message?.content;
+  if (content) return content;
+  throw new Error('AI返回内容为空');
 }
 
 // 通用 OpenAI 协议聊天请求封装（用于 Vision 两步调用）
-function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs = 60000) {
-  const url = makeChatUrl(profile);
-
-  return new Promise((resolve, reject) => {
-    gm.xhr({
-      method: 'POST',
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${profile.apiKey}`,
-      },
-      data: JSON.stringify(withProfileTemperature(profile, payload)),
-      timeout: timeoutMs,
-      onload: (res) => {
-        try {
-          console.log(`[雨课堂助手]${debugLabel} Status:`, res.status);
-          console.log(`[雨课堂助手]${debugLabel} Response:`, res.responseText);
-
-          if (res.status !== 200) {
-            let errorMessage = `AI 请求失败: ${res.status}`;
-            try {
-              const errorData = JSON.parse(res.responseText);
-              if (errorData.error?.message) {
-                errorMessage += ` - ${errorData.error.message}`;
-              }
-              if (errorData.error?.code) {
-                errorMessage += ` (${errorData.error.code})`;
-              }
-            } catch {
-              errorMessage += ` - ${res.responseText}`;
-            }
-            reject(new Error(errorMessage));
-            return;
-          }
-
-          const data = JSON.parse(res.responseText);
-          resolve(data);
-        } catch (e) {
-          console.error(`[雨课堂助手]${debugLabel} 解析响应失败:`, e);
-          reject(new Error(`解析API响应失败: ${e.message}`));
-        }
-      },
-      onerror: (err) => {
-        console.error(`[雨课堂助手]${debugLabel} 网络请求失败:`, err);
-        reject(new Error('网络请求失败'));
-      },
-    });
-  });
+function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs = DEFAULT_AI_REQUEST_TIMEOUT_MS) {
+  return requestChatCompletion(profile, payload, debugLabel, timeoutMs);
 }
 
 async function singleStepVisionCall(profile, cleanBase64List, textPrompt, options = {}) {
   const visionModel = profile.visionModel || profile.model;
-  const timeoutMs = options.timeout || 60000;
+  const timeoutMs = resolveAIRequestTimeout(null, options.timeout);
 
   const visionTextHeader = [
     '【融合模式说明】你将看到一张课件/PPT截图与可选的附加文本。',
@@ -266,10 +357,11 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
   const {
     disableTwoStep = false,
     twoStepDebug = false,
-    timeout: timeoutMs = 60000,
+    timeout = undefined,
     problemType = null,          // ← 新增：后端题型（数字或字符串都行）
     profileId = null,
   } = options || {};
+  const timeoutMs = resolveAIRequestTimeout(aiCfg, timeout);
 
   const profile = getActiveProfile(aiCfg, profileId);
   if (!profile || !profile.apiKey) {
@@ -397,6 +489,7 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
 
     structuredQuestion = JSON.parse(jsonMatch[0]);
   } catch (err) {
+    if (isAITimeoutError(err)) throw err;
     console.warn('[雨课堂助手][WARN][vision-step1] failed, fallback to single-step', err);
     return singleStepVisionCall(profile, cleanBase64List, textPrompt, { timeout: timeoutMs });
   }
@@ -522,6 +615,7 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
     }
     return content2;
   } catch (err) {
+    if (isAITimeoutError(err)) throw err;
     console.warn('[雨课堂助手][WARN][vision-step2] failed, fallback to single-step', err);
     return singleStepVisionCall(profile, cleanBase64List, textPrompt, { timeout: timeoutMs });
   }
@@ -530,7 +624,7 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
 export async function queryOCRVision(imageBase64, aiCfg) {
   const cfg = aiCfg || {};
   const baseProfile = getActiveProfile(cfg);
-  const resolvedApiKey = (cfg.ocrApiKey || '').trim() || baseProfile?.apiKey || '';
+  const resolvedApiKey = resolveServiceApiKey('OCR', cfg.ocrApiKey, cfg.ocrApi, baseProfile);
   if (!baseProfile || !resolvedApiKey) {
     throw new Error('请先在设置中填写可用的 OCR API Key 或 AI API Key');
   }
@@ -589,7 +683,7 @@ export async function queryOCRVision(imageBase64, aiCfg) {
 export async function queryTranslationText(text, targetLanguage, aiCfg) {
   const cfg = aiCfg || {};
   const baseProfile = getActiveProfile(cfg);
-  const resolvedApiKey = (cfg.translateApiKey || '').trim() || baseProfile?.apiKey || '';
+  const resolvedApiKey = resolveServiceApiKey('翻译', cfg.translateApiKey, cfg.translateApi, baseProfile);
   if (!baseProfile || !resolvedApiKey) {
     throw new Error('请先在设置中填写可用的翻译 API Key 或 AI API Key');
   }

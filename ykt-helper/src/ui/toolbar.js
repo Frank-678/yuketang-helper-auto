@@ -1,5 +1,6 @@
 // src/ui/toolbar.js
-import { ui } from './ui-api.js';
+import { ui } from './ui-context.js';
+import { trustedUiHandler } from '../core/trusted-ui-event.js';
 
 export function installToolbar() {
   // 仅创建容器与按钮；具体面板之后用 HTML/Vue 接入
@@ -20,41 +21,52 @@ export function installToolbar() {
   ui.updateAutoAnswerBtn();
 
   // 事件绑定
-  bar.querySelector('#ykt-btn-bell')?.addEventListener('click', () => {
-    ui.config.notifyProblems = !ui.config.notifyProblems;
-    ui.saveConfig();
+  bar.querySelector('#ykt-btn-bell')?.addEventListener('click', trustedUiHandler(() => {
+    const previous = ui.config.notifyProblems;
+    ui.config.notifyProblems = !previous;
+    if (ui.saveConfig() === false) {
+      ui.config.notifyProblems = previous;
+      ui.toast('设置保存失败，修改未应用', 4000);
+      return;
+    }
     ui.toast(`习题提醒：${ui.config.notifyProblems ? '开' : '关'}`);
     bar.querySelector('#ykt-btn-bell')?.classList.toggle('active', ui.config.notifyProblems);
-  });
+  }));
 
   // 课件浏览按钮
-  bar.querySelector('#ykt-btn-pres')?.addEventListener('click', () => {
+  bar.querySelector('#ykt-btn-pres')?.addEventListener('click', trustedUiHandler(() => {
     const btn = bar.querySelector('#ykt-btn-pres');
     const isActive = btn.classList.contains('active');
     ui.showPresentationPanel?.(!isActive);
     btn.classList.toggle('active', !isActive);
-  });
+  }));
 
   // AI按钮
-  bar.querySelector('#ykt-btn-ai')?.addEventListener('click', () => {
+  bar.querySelector('#ykt-btn-ai')?.addEventListener('click', trustedUiHandler(() => {
     const btn = bar.querySelector('#ykt-btn-ai');
     const isActive = btn.classList.contains('active');
     ui.showAIPanel?.(!isActive);
     btn.classList.toggle('active', !isActive);
-  });
+  }));
 
-  bar.querySelector('#ykt-btn-auto-answer')?.addEventListener('click', () => {
-    ui.config.autoAnswer = !ui.config.autoAnswer;
-    ui.saveConfig();
+  bar.querySelector('#ykt-btn-auto-answer')?.addEventListener('click', trustedUiHandler(() => {
+    const previous = ui.config.autoAnswer;
+    ui.config.autoAnswer = !previous;
+    if (ui.saveConfig() === false) {
+      ui.config.autoAnswer = previous;
+      ui.updateAutoAnswerBtn();
+      ui.toast('设置保存失败，修改未应用', 4000);
+      return;
+    }
     ui.toast(`自动作答：${ui.config.autoAnswer ? '开' : '关'}`);
     ui.updateAutoAnswerBtn();
-  });
+  }));
 
-  bar.querySelector('#ykt-btn-settings')?.addEventListener('click', () => {
+  bar.querySelector('#ykt-btn-settings')?.addEventListener('click', trustedUiHandler(() => {
     ui.toggleSettingsPanel?.();
-  });
+  }));
 
-  bar.querySelector('#ykt-btn-help')?.addEventListener('click', () => {
+  bar.querySelector('#ykt-btn-help')?.addEventListener('click', trustedUiHandler(() => {
     ui.toggleTutorialPanel?.();
-  });
+  }));
 }

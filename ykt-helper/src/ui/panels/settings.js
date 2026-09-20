@@ -1,9 +1,10 @@
 // settings.js (new version)
 import tpl from './settings.html';
-import { ui } from '../ui-api.js';
+import { ui } from '../ui-context.js';
 import { DEFAULT_CONFIG } from '../../core/types.js';
 import { storage } from '../../core/storage.js';
 import { screenWakeLock } from '../../core/screen-wake-lock.js';
+import { trustedUiHandler } from '../../core/trusted-ui-event.js';
 import { applyProfileForm, readReminderForm, syncReminderForm } from '../../core/settings-form.js';
 
 let mounted = false;
@@ -81,13 +82,16 @@ export function mountSettingsPanel() {
   const $profileName = root.querySelector('#ykt-ai-profile-name');
   const $baseUrl = root.querySelector('#ykt-ai-base-url');
   const $api = root.querySelector('#kimi-api-key');
+  const $apiClear = root.querySelector('#ykt-ai-api-key-clear');
   const $model = root.querySelector('#ykt-ai-model');
   const $visionModel = root.querySelector('#ykt-ai-vision-model');
   const $temperature = root.querySelector('#ykt-ai-temperature');
   const $ocrApi = root.querySelector('#ykt-ai-ocr-api');
   const $ocrApiKey = root.querySelector('#ykt-ai-ocr-api-key');
+  const $ocrApiKeyClear = root.querySelector('#ykt-ai-ocr-api-key-clear');
   const $translateApi = root.querySelector('#ykt-ai-translate-api');
   const $translateApiKey = root.querySelector('#ykt-ai-translate-api-key');
+  const $translateApiKeyClear = root.querySelector('#ykt-ai-translate-api-key-clear');
   const $translateModel = root.querySelector('#ykt-ai-translate-model');
 
   // === 其他 UI 原有字段 ===
@@ -152,6 +156,47 @@ export function mountSettingsPanel() {
     notifySound: $notifySound,
   };
 
+  function syncSecretField(input, hasStoredSecret, emptyPlaceholder) {
+    if (!input) return;
+    input.value = '';
+    input.dataset.clearSecret = 'false';
+    input.placeholder = hasStoredSecret
+      ? '已安全保存；留空保持不变'
+      : emptyPlaceholder;
+  }
+
+  function readSecretField(input, existingValue = '') {
+    if (!input) return String(existingValue || '');
+    if (input.dataset.clearSecret === 'true') return '';
+    const entered = String(input.value || '').trim();
+    return entered || String(existingValue || '');
+  }
+
+  function armSecretClear(input) {
+    if (!input) return;
+    input.value = '';
+    input.dataset.clearSecret = 'true';
+    input.placeholder = '保存设置后将清除此 Key';
+  }
+
+  function normalizedEndpoint(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try { return new URL(raw, window.location?.origin || location.origin).href; }
+    catch { return raw; }
+  }
+
+  function endpointChanged(before, after) {
+    return normalizedEndpoint(before) !== normalizedEndpoint(after);
+  }
+
+  function needsSecretReentry({ currentEndpoint, nextEndpoint, currentSecret, input }) {
+    if (!String(currentSecret || '').trim()) return false;
+    if (!endpointChanged(currentEndpoint, nextEndpoint)) return false;
+    if (input?.dataset?.clearSecret === 'true') return false;
+    return !String(input?.value || '').trim();
+  }
+
   // Profile UI
   function refreshProfileSelect() {
     const ai = ui.config.ai;
@@ -197,14 +242,14 @@ export function mountSettingsPanel() {
 
     $profileName.value = p.name || '';
     $baseUrl.value = p.baseUrl || '';
-    $api.value = p.apiKey || '';
+    syncSecretField($api, !!p.apiKey, '输入当前配置的 API Key');
     $model.value = p.model || '';
     $visionModel.value = p.visionModel || '';
     $temperature.value = p.temperature ?? '';
     $ocrApi.value = ui.config.ai.ocrApi || '';
-    $ocrApiKey.value = ui.config.ai.ocrApiKey || '';
+    syncSecretField($ocrApiKey, !!ui.config.ai.ocrApiKey, '留空则复用当前 AI Profile 的 API Key');
     $translateApi.value = ui.config.ai.translateApi || '';
-    $translateApiKey.value = ui.config.ai.translateApiKey || '';
+    syncSecretField($translateApiKey, !!ui.config.ai.translateApiKey, '留空则复用当前 AI Profile 的 API Key');
     $translateModel.value = ui.config.ai.translateModel || '';
   }
 
@@ -219,7 +264,7 @@ export function mountSettingsPanel() {
   });
 
   // 添加 profile
-  $profileAdd.addEventListener('click', () => {
+  $profileAdd.addEventListener('click', trustedUiHandler(() => {
     const id = `p_${Date.now().toString(36)}`;
     const newP = {
       id,
@@ -236,10 +281,10 @@ export function mountSettingsPanel() {
     refreshProfileSelect();
     refreshAnswerProfileSelects();
     loadProfileToForm(id);
-  });
+  }));
 
   // 删除 profile
-  $profileDel.addEventListener('click', () => {
+  $profileDel.addEventListener('click', trustedUiHandler(() => {
     const ai = ui.config.ai;
     if (ai.profiles.length <= 1) {
       ui.toast('至少保留一个配置', 2500);
@@ -252,7 +297,11 @@ export function mountSettingsPanel() {
     refreshProfileSelect();
     refreshAnswerProfileSelects();
     loadProfileToForm(ai.activeProfileId);
-  });
+  }));
+
+  $apiClear?.addEventListener('click', trustedUiHandler(() => armSecretClear($api)));
+  $ocrApiKeyClear?.addEventListener('click', trustedUiHandler(() => armSecretClear($ocrApiKey)));
+  $translateApiKeyClear?.addEventListener('click', trustedUiHandler(() => armSecretClear($translateApiKey)));
 
   function syncFormFromConfig() {
     ensureAIProfiles(ui.config.ai || (ui.config.ai = {}));
@@ -295,9 +344,25 @@ export function mountSettingsPanel() {
   syncMountedForm = syncFormFromConfig;
   syncFormFromConfig();
 
+  function captureConfigSnapshot() {
+    return JSON.parse(JSON.stringify(ui.config));
+  }
+
+  function restoreConfigSnapshot(snapshot) {
+    for (const key of Object.keys(ui.config)) delete ui.config[key];
+    Object.assign(ui.config, snapshot);
+    syncFormFromConfig();
+  }
+
+  function reportConfigSaveFailure(snapshot) {
+    restoreConfigSnapshot(snapshot);
+    ui.toast('设置保存失败；本次修改未应用，请检查 userscript manager 私有存储权限', 5000);
+  }
+
   // 保存设置
 
-  root.querySelector('#ykt-btn-settings-save').addEventListener('click', async () => {
+  root.querySelector('#ykt-btn-settings-save').addEventListener('click', trustedUiHandler(async () => {
+    const previousConfig = captureConfigSnapshot();
     // --- 保存当前 Profile ---
     const ai = ui.config.ai;
     const pid = ai.activeProfileId;
@@ -313,10 +378,44 @@ export function mountSettingsPanel() {
       return;
     }
 
+    const nextProfileEndpoint = String($baseUrl.value || '').trim() || p.baseUrl || '';
+    const nextOcrEndpoint = String($ocrApi.value || '').trim();
+    const nextTranslateEndpoint = String($translateApi.value || '').trim();
+
+    if (needsSecretReentry({
+      currentEndpoint: p.baseUrl,
+      nextEndpoint: nextProfileEndpoint,
+      currentSecret: p.apiKey,
+      input: $api,
+    })) {
+      ui.toast('修改 AI API URL 时必须重新输入 API Key，以确认新的密钥绑定', 4000);
+      return;
+    }
+
+    if (needsSecretReentry({
+      currentEndpoint: ai.ocrApi || p.baseUrl,
+      nextEndpoint: nextOcrEndpoint || nextProfileEndpoint,
+      currentSecret: ai.ocrApiKey,
+      input: $ocrApiKey,
+    })) {
+      ui.toast('修改 OCR API URL 时必须重新输入 OCR API Key', 4000);
+      return;
+    }
+
+    if (needsSecretReentry({
+      currentEndpoint: ai.translateApi || p.baseUrl,
+      nextEndpoint: nextTranslateEndpoint || nextProfileEndpoint,
+      currentSecret: ai.translateApiKey,
+      input: $translateApiKey,
+    })) {
+      ui.toast('修改翻译 API URL 时必须重新输入翻译 API Key', 4000);
+      return;
+    }
+
     const profileResult = applyProfileForm(p, {
       name: $profileName.value,
-      baseUrl: $baseUrl.value,
-      apiKey: $api.value,
+      baseUrl: nextProfileEndpoint,
+      apiKey: readSecretField($api, p.apiKey),
       model: $model.value,
       visionModel: $visionModel.value,
       temperature: $temperature.value,
@@ -327,15 +426,14 @@ export function mountSettingsPanel() {
     }
 
     ai.ocrApi = $ocrApi.value.trim();
-    ai.ocrApiKey = $ocrApiKey.value.trim();
+    ai.ocrApiKey = readSecretField($ocrApiKey, ai.ocrApiKey);
     ai.translateApi = $translateApi.value.trim();
-    ai.translateApiKey = $translateApiKey.value.trim();
+    ai.translateApiKey = readSecretField($translateApiKey, ai.translateApiKey);
     ai.translateModel = $translateModel.value.trim();
     const curOpt = $profileSelect.querySelector(`option[value="${p.id}"]`);
     if (curOpt) curOpt.textContent = p.name || p.id;
 
     ai.kimiApiKey = p.apiKey;
-    storage.set('kimiApiKey', p.apiKey);
     ui.config.autoJoinEnabled = !!$autoJoin.checked;
     ui.config.autoAnswerOnAutoJoin = !!$autoJoinAutoAnswer.checked;
     ui.config.autoAnswer = !!$auto.checked;
@@ -360,7 +458,13 @@ export function mountSettingsPanel() {
     ui.config.autoFollowDanmu = !!$autoFollowDanmu.checked;
     ui.config.keepScreenAwake = !!$keepScreenAwake.checked;
 
-    ui.saveConfig();
+    if (ui.saveConfig() === false) {
+      reportConfigSaveFailure(previousConfig);
+      return;
+    }
+    syncSecretField($api, !!p.apiKey, '输入当前配置的 API Key');
+    syncSecretField($ocrApiKey, !!ai.ocrApiKey, '留空则复用当前 AI Profile 的 API Key');
+    syncSecretField($translateApiKey, !!ai.translateApiKey, '留空则复用当前 AI Profile 的 API Key');
     document.getElementById('ykt-btn-bell')?.classList.toggle('active', ui.config.notifyProblems);
     ui.updateAutoAnswerBtn();
     const wakeLockStatus = await screenWakeLock.setEnabled(ui.config.keepScreenAwake);
@@ -373,14 +477,15 @@ export function mountSettingsPanel() {
     } else {
       ui.toast('设置已保存');
     }
-  });
+  }));
 
   //--------------------------------------
   //            重置为默认
   //--------------------------------------
 
-  root.querySelector('#ykt-btn-settings-reset').addEventListener('click', async () => {
+  root.querySelector('#ykt-btn-settings-reset').addEventListener('click', trustedUiHandler(async () => {
     if (!confirm('确定要重置为默认设置吗？')) return;
+    const previousConfig = captureConfigSnapshot();
 
     Object.assign(ui.config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
 
@@ -393,20 +498,21 @@ export function mountSettingsPanel() {
     ui.config.autoScanUnanswered = false;
     syncFormFromConfig();
 
-    storage.set('kimiApiKey', '');
-
-    ui.saveConfig();
+    if (ui.saveConfig() === false) {
+      reportConfigSaveFailure(previousConfig);
+      return;
+    }
     document.getElementById('ykt-btn-bell')?.classList.toggle('active', ui.config.notifyProblems);
     ui.updateAutoAnswerBtn();
     await screenWakeLock.setEnabled(false);
     ui.toast('设置已重置');
-  });
+  }));
 
   // 音频设置
   const MAX_SIZE = 2 * 1024 * 1024;
 
   if ($audioFile) {
-    $audioFile.addEventListener('change', (e) => {
+    $audioFile.addEventListener('change', trustedUiHandler((e) => {
       const f = e.target.files?.[0];
       if (!f) return;
       if (f.size > MAX_SIZE) {
@@ -416,17 +522,20 @@ export function mountSettingsPanel() {
       const reader = new FileReader();
       reader.onload = () => {
         const src = reader.result;
-        ui.setCustomNotifyAudio({ src, name: f.name });
+        if (ui.setCustomNotifyAudio({ src, name: f.name }) === false) {
+          ui.toast('设置保存失败，未应用自定义提示音', 4000);
+          return;
+        }
         $audioName.textContent = `当前：${f.name}`;
         ui._playNotifySound(ui.config.notifyVolume);
         ui.toast('已应用自定义提示音');
       };
       reader.readAsDataURL(f);
-    });
+    }));
   }
 
   if ($applyUrl) {
-    $applyUrl.addEventListener('click', () => {
+    $applyUrl.addEventListener('click', trustedUiHandler(() => {
       const url = ($audioUrl.value || '').trim();
       if (!url) return ui.toast('请输入音频URL');
 
@@ -435,38 +544,44 @@ export function mountSettingsPanel() {
         return;
       }
 
-      ui.setCustomNotifyAudio({ src: url, name: '' });
+      if (ui.setCustomNotifyAudio({ src: url, name: '' }) === false) {
+        ui.toast('设置保存失败，未应用自定义音频URL', 4000);
+        return;
+      }
       $audioName.textContent = '当前：（自定义URL）';
       ui._playNotifySound(ui.config.notifyVolume);
       ui.toast('已应用自定义音频URL');
-    });
+    }));
   }
 
   if ($preview) {
-    $preview.addEventListener('click', () => {
+    $preview.addEventListener('click', trustedUiHandler(() => {
       ui._playNotifySound(ui.config.notifyVolume);
-    });
+    }));
   }
 
   if ($clear) {
-    $clear.addEventListener('click', () => {
-      ui.setCustomNotifyAudio({ src: '', name: '' });
+    $clear.addEventListener('click', trustedUiHandler(() => {
+      if (ui.setCustomNotifyAudio({ src: '', name: '' }) === false) {
+        ui.toast('设置保存失败，未清除自定义提示音', 4000);
+        return;
+      }
       $audioName.textContent = '当前：使用内置“叮-咚”提示音';
       ui.toast('已清除自定义音频');
-    });
+    }));
   }
 
   // 测试提醒
   const $btnTest = root.querySelector('#ykt-btn-test-notify');
   if ($btnTest) {
-    $btnTest.addEventListener('click', () => {
+    $btnTest.addEventListener('click', trustedUiHandler(() => {
       const mockProblem = {
         problemId: 'TEST-001',
         body: '【测试题】这是一个测试提醒',
         options: [],
       };
       ui.notifyProblem(mockProblem, { thumbnail: null });
-    });
+    }));
   }
 
   // 关闭按钮

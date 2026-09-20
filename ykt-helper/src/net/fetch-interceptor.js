@@ -1,14 +1,17 @@
 import { repo } from '../state/repo.js';
-import { actions } from '../state/actions.js';
+import { isYuketangUrl } from '../core/yuketang-origin.js';
+
+let fetchInterceptorInstalled = false;
 
 (function interceptFetch() {
-  if (window.__YKT_FETCH_PATCHED__) return;
-  window.__YKT_FETCH_PATCHED__ = true;
+  if (fetchInterceptorInstalled) return;
+  fetchInterceptorInstalled = true;
 
   const rawFetch = window.fetch;
   window.fetch = async function (...args) {
     const [input, init] = args;
     const url = typeof input === 'string' ? input : input?.url || '';
+    const trustedYuketangRequest = isYuketangUrl(url, window.location?.href || location.href);
 
     // === (1) 打印调试日志，可观察哪些接口走 fetch ===
     if (url.includes('lesson') || url.includes('slide') || url.includes('problem')) {
@@ -20,10 +23,11 @@ import { actions } from '../state/actions.js';
     try {
       // === (2) 只拦截 Rain Classroom 的 JSON 接口 ===
       if (
-        url.includes('/lesson') ||
+        trustedYuketangRequest &&
+        (url.includes('/lesson') ||
         url.includes('/presentation') ||
         url.includes('/slides') ||
-        url.includes('/problem')
+        url.includes('/problem'))
       ) {
         const cloned = resp.clone();
         const text = await cloned.text();

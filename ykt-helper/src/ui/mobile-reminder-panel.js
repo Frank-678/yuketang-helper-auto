@@ -2,7 +2,8 @@
 import { REMINDER_CHANNEL_OPTIONS, REMINDER_EVENT_OPTIONS } from '../core/reminder-preferences.js';
 import { readReminderForm, syncReminderForm } from '../core/settings-form.js';
 import { screenWakeLock } from '../core/screen-wake-lock.js';
-import { ui } from './ui-api.js';
+import { ui } from './ui-context.js';
+import { trustedUiHandler } from '../core/trusted-ui-event.js';
 
 let mounted = false;
 let root = null;
@@ -166,13 +167,25 @@ export function mountMobileReminderPanel() {
   };
 
   const save = async () => {
-    Object.assign(ui.config, readReminderForm(reminderFields));
-    ui.config.notifyPopupDuration = Math.max(2000, (+$duration.value || 0) * 1000);
-    ui.config.notifyVolume = Math.max(0, Math.min(1, (+$volume.value || 0) / 100));
-    ui.config.keepScreenAwake = !!$wakeLock.checked;
-    ui.saveConfig();
+    const nextConfig = {
+      ...readReminderForm(reminderFields),
+      notifyPopupDuration: Math.max(2000, (+$duration.value || 0) * 1000),
+      notifyVolume: Math.max(0, Math.min(1, (+$volume.value || 0) / 100)),
+      keepScreenAwake: !!$wakeLock.checked,
+    };
+    const previousConfig = Object.fromEntries(
+      Object.keys(nextConfig).map(key => [key, ui.config[key]]),
+    );
+    Object.assign(ui.config, nextConfig);
+    if (ui.saveConfig() === false) {
+      Object.assign(ui.config, previousConfig);
+      sync();
+      $status.textContent = '设置保存失败，修改未应用。';
+      return false;
+    }
     const wakeLockStatus = await screenWakeLock.setEnabled(ui.config.keepScreenAwake);
     showWakeLockStatus(wakeLockStatus);
+    return true;
   };
 
   const sync = () => {
@@ -186,14 +199,14 @@ export function mountMobileReminderPanel() {
   $toggle.addEventListener('click', () => setOpen(!root.classList.contains('ykt-mobile-reminder-open')));
   $close.addEventListener('click', () => setOpen(false));
   $closeSheet.addEventListener('click', () => setOpen(false));
-  $sheet.addEventListener('change', () => { void save(); });
-  $test.addEventListener('click', () => {
+  $sheet.addEventListener('change', trustedUiHandler(() => { void save(); }));
+  $test.addEventListener('click', trustedUiHandler(() => {
     ui.notifyProblem({
       problemId: 'MOBILE-REMINDER-TEST',
       body: '【测试提醒】当前已按所选提醒方式发送。',
       options: [],
     }, null, { title: '课堂提醒测试', nativeTitle: '课堂提醒测试' });
-  });
+  }));
 
   sync();
   mounted = true;

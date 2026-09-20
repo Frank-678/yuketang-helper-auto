@@ -48,11 +48,12 @@ test('a live unlock re-arms a status previously hydrated by timeline replay', ()
   );
 });
 
-test('configuration changes start or stop auto-join immediately', () => {
+test('configuration changes start or stop auto-join immediately through the private event bus', () => {
   assert.match(
     actionsSource,
-    /ykt:auto-answer-config-changed[\s\S]*?ui\.config\.autoJoinEnabled[\s\S]*?actions\.maybeStartAutoJoin\(\)[\s\S]*?actions\.stopAutoJoinLoop\(\)/
+    /onInternalEvent\(['"]auto-answer-config-changed['"][\s\S]*?ui\.config\.autoJoinEnabled[\s\S]*?actions\.maybeStartAutoJoin\(\)[\s\S]*?actions\.stopAutoJoinLoop\(\)/
   );
+  assert.doesNotMatch(actionsSource, /window\.addEventListener\(['"]ykt:auto-answer-config-changed/);
 });
 
 test('stopping auto-join makes it restartable and closes managed classroom sockets', () => {

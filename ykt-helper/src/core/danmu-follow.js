@@ -47,25 +47,33 @@ export function extractDanmuMessage(message) {
 
 /**
  * Tracks classroom barrage round boundaries without applying follow rules.
- * The first observed message starts round 1 silently; a later message starts
- * a new round when the adjacent gap reaches the configured roundGapMs.
+ * A round is hard-bounded by roundGapMs and also ends early when the adjacent
+ * message gap reaches roundGapMs. This prevents a continuously busy classroom
+ * from remaining in one round indefinitely.
  */
 export function createDanmuRoundTracker(options = {}) {
   const roundGapMs = finitePositive(options.roundGapMs, DEFAULTS.roundGapMs);
   let lastAt = null;
+  let roundStartedAt = null;
   let roundNumber = 0;
 
   function reset() {
     lastAt = null;
+    roundStartedAt = null;
     roundNumber = 0;
   }
 
   function observe(at = Date.now()) {
     const timestamp = Number(at);
     const now = Number.isFinite(timestamp) ? timestamp : Date.now();
-    const roundStarted = lastAt !== null && now - lastAt >= roundGapMs;
+    const gapBoundary = lastAt !== null && (now < lastAt || now - lastAt >= roundGapMs);
+    const durationBoundary = roundStartedAt !== null && now - roundStartedAt >= roundGapMs;
+    const roundStarted = lastAt !== null && (gapBoundary || durationBoundary);
 
-    if (lastAt === null || roundStarted) roundNumber += 1;
+    if (lastAt === null || roundStarted) {
+      roundNumber += 1;
+      roundStartedAt = now;
+    }
     lastAt = now;
 
     return {
@@ -86,11 +94,10 @@ export function createDanmuRoundTracker(options = {}) {
 
 /**
  * Tracks one classroom's barrage stream.
- * A round continues while each adjacent non-empty message is less than the
- * configured gap apart.  Once windowSize consecutive messages are available,
- * they must fit inside burstWindowMs; the most frequent exact text wins, with
- * the newest text breaking ties.  Each completed burst is consumed so one
- * message cannot trigger twice.
+ * A round is at most roundGapMs long and can also end earlier after a gap of
+ * roundGapMs. Once windowSize consecutive messages are available, they must fit
+ * inside burstWindowMs; the most frequent exact text wins, with the newest text
+ * breaking ties. Each completed burst is consumed so one message cannot trigger twice.
  */
 export function createDanmuFollowTracker(options = {}) {
   const windowSize = Math.max(1, Math.floor(finitePositive(options.windowSize, DEFAULTS.windowSize)));
@@ -105,12 +112,14 @@ export function createDanmuFollowTracker(options = {}) {
 
   let messages = [];
   let lastAt = null;
+  let roundStartedAt = null;
   let sentCount = 0;
   let followedTexts = new Set();
 
   function reset() {
     messages = [];
     lastAt = null;
+    roundStartedAt = null;
     sentCount = 0;
     followedTexts = new Set();
   }
@@ -133,7 +142,10 @@ export function createDanmuFollowTracker(options = {}) {
 
     const timestamp = Number(at);
     const now = Number.isFinite(timestamp) ? timestamp : Date.now();
-    if (lastAt !== null && (now < lastAt || now - lastAt >= roundGapMs)) reset();
+    const gapBoundary = lastAt !== null && (now < lastAt || now - lastAt >= roundGapMs);
+    const durationBoundary = roundStartedAt !== null && now - roundStartedAt >= roundGapMs;
+    if (gapBoundary || durationBoundary) reset();
+    if (roundStartedAt === null) roundStartedAt = now;
 
     messages.push({ text, at: now });
     if (messages.length > windowSize) messages = messages.slice(-windowSize);

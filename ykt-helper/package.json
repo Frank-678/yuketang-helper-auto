@@ -6,17 +6,19 @@
   "scripts": {
     "build": "rollup -c",
     "dev": "rollup -c -w",
-    "test": "node --test test/*.test.js",
+    "test": "npm run test:legacy && npm run test:unit && npm run test:contract && npm run test:scenario",
+    "test:legacy": "node --test test/*.test.js",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:contract": "node test/support/run-test-files.mjs contract",
+    "test:scenario": "node test/support/run-test-files.mjs scenario",
+    "test:build": "node --test test/build/*.test.js",
+    "test:all": "npm test && npm run build && npm run test:build",
     "postbuild": "node -e \"import('./rollup.config.mjs').then(({ OUT_FILE }) => console.log('\\n✅ Build done: ' + OUT_FILE))\""
   },
   "devDependencies": {
     "@bkuri/rollup-plugin-string": "^1.0.0",
-    "@rollup/plugin-commonjs": "^25.0.7",
-    "@rollup/plugin-node-resolve": "^15.2.3",
     "@rollup/plugin-replace": "^5.0.7",
-    "@rollup/plugin-terser": "^0.4.4",
-    "@rollup/plugin-typescript": "^11.1.6",
-    "rollup": "^4.21.2",
-    "typescript": "^5.6.3"
+    "@rollup/plugin-terser": "1.0.0",
+    "rollup": "4.63.3"
   }
 }

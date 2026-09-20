@@ -237,11 +237,10 @@ test('untimed empty-result problems reach the answer runner', async () => {
   const { createAutoAnswerRunner } = await loadRunner();
   for (const result of [[], {}]) {
     let submitted = 0;
-    const runner = createAutoAnswerRunner({
-      hasActiveProfile: () => false,
-      makeDefaultAnswer: () => ['A'],
+    const { dependencies } = createRunnerHarness({
       submitAnswer: async () => { submitted += 1; return { route: 'answer' }; },
     });
+    const runner = createAutoAnswerRunner(dependencies);
     const problem = { problemId: 'untimed-empty-result', problemType: 1, result };
     const status = { done: false, answering: false, endTime: null, phase: 'queued', autoAnswerTime: null };
     const response = await runner.run(problem, status);
@@ -253,11 +252,11 @@ test('untimed empty-result problems reach the answer runner', async () => {
 test('manual force with allowResubmit bypasses done status and existing result', async () => {
   const { createAutoAnswerRunner } = await loadRunner();
   let submitted = 0;
-  const runner = createAutoAnswerRunner({
-    hasActiveProfile: () => false,
-    makeDefaultAnswer: () => ['B'],
+  const { dependencies } = createRunnerHarness({
+    parseAIAnswer: () => ['B'],
     submitAnswer: async () => { submitted += 1; return { route: 'answer' }; },
   });
+  const runner = createAutoAnswerRunner(dependencies);
   const problem = { problemId: 'force-resubmit', problemType: 1, result: ['A'] };
   const status = { done: true, answering: false, endTime: null, phase: 'done', autoAnswerTime: null };
   const response = await runner.run(problem, status, { force: true, allowResubmit: true, source: 'manual' });

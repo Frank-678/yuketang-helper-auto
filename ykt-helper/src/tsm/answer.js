@@ -1,21 +1,32 @@
-import { ui } from '../ui/ui-api.js';
+import { ui } from '../ui/ui-context.js';
 import { repo } from '../state/repo.js';
+import { shouldAutoAnswerForLesson } from '../core/auto-answer-policy.js';
 import { chooseAnswerRoute } from './answer-routing.js';
 
+const ANSWER_REQUEST_TIMEOUT_MS = 15000;
+
 function sleep(ms) { return new Promise(r => setTimeout(r, Math.max(0, ms|0))); }
+
+function answerBusinessError(resp, context = '提交') {
+  const code = Number(resp?.code);
+  const raw = String(resp?.msg || '请求失败');
+  let message = `${raw} (${resp?.code})`;
+  if (code === 50028) {
+    message = '题目已提交过，普通提交被服务器拒绝；请使用“强制补交” (50028)';
+  } else if (code === 50026) {
+    message = '题目已结束，普通提交被服务器拒绝；请使用“强制补交” (50026)';
+  }
+  const error = new Error(message);
+  error.code = Number.isFinite(code) ? code : resp?.code;
+  error.serverMessage = raw;
+  error.context = context;
+  return error;
+}
 function calcAutoWaitMs() {
   const base = Math.max(0, (ui?.config?.autoAnswerDelay ?? 0));
   const rand = Math.max(0, (ui?.config?.autoAnswerRandomDelay ?? 0));
   return base + (rand ? Math.floor(Math.random() * rand) : 0);
 }
-function shouldAutoAnswerForLesson_(lessonId) {
-  if (ui?.config?.autoAnswer) return true;
-  if (!lessonId) return false;
-  if (repo?.autoJoinedLessons?.has(lessonId) && ui?.config?.autoAnswerOnAutoJoin) return true;
-  if (repo?.forceAutoAnswerLessons?.has(lessonId)) return true;
-  return false;
-}
-
 
 const DEFAULT_HEADERS = () => ({
   'Content-Type': 'application/json',
@@ -26,6 +37,7 @@ const DEFAULT_HEADERS = () => ({
 
 /**
  * Low-level POST helper using XMLHttpRequest to align with site requirements.
+ * Every mutating request is bounded so UI/action locks cannot remain pending forever.
  * @param {string} url
  * @param {object} data
  * @param {Record<string,string>} headers
@@ -36,8 +48,14 @@ function xhrPost(url, data, headers) {
     try {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', url);
+      xhr.timeout = ANSWER_REQUEST_TIMEOUT_MS;
       for (const [k, v] of Object.entries(headers || {})) xhr.setRequestHeader(k, v);
       xhr.onload = () => {
+        const status = Number(xhr.status);
+        if (Number.isFinite(status) && status !== 0 && (status < 200 || status >= 300)) {
+          reject(new Error(`HTTP ${status} 请求失败`));
+          return;
+        }
         try {
           const resp = JSON.parse(xhr.responseText);
           if (resp && typeof resp === 'object') {
@@ -50,6 +68,7 @@ function xhrPost(url, data, headers) {
         }
       };
       xhr.onerror = () => reject(new Error('网络请求失败'));
+      xhr.ontimeout = () => reject(new Error(`网络请求超时（${ANSWER_REQUEST_TIMEOUT_MS}ms）`));
       xhr.send(JSON.stringify(data));
     } catch (e) {
       reject(e);
@@ -76,7 +95,7 @@ export async function answerProblem(problem, result, options = {}) {
 
   const resp = await xhrPost(url, payload, headers);
   if (resp.code === 0) return resp;
-  throw new Error(`${resp.msg} (${resp.code})`);
+  throw answerBusinessError(resp, 'answer');
 }
 
 /**
@@ -101,10 +120,12 @@ export async function retryAnswer(problem, result, dt, options = {}) {
 
   const resp = await xhrPost(url, payload, headers);
   if (resp.code !== 0) {
-    throw new Error(`${resp.msg} (${resp.code})`);
+    throw answerBusinessError(resp, 'retry');
   }
   const okList = resp?.data?.success || [];
-  if (!Array.isArray(okList) || !okList.includes(problem.problemId)) {
+  const targetId = String(problem.problemId);
+  const confirmed = Array.isArray(okList) && okList.some(id => String(id) === targetId);
+  if (!confirmed) {
     throw new Error('服务器未返回成功信息');
   }
   return resp;
@@ -137,9 +158,14 @@ export async function submitAnswer(problem, result, submitOptions = {}) {
   const waitMs = submitOptions?.waitMs;
   const lessonIdFromOpts = submitOptions && 'lessonId' in submitOptions ? submitOptions.lessonId : undefined;
 
-   // 统一拿 lessonId
-   const lessonId = (lessonIdFromOpts ?? repo?.currentLessonId ?? null);
-  if (autoGate && shouldAutoAnswerForLesson_(lessonId)) {
+  const lessonId = (lessonIdFromOpts ?? repo?.currentLessonId ?? null);
+  const autoAnswerEnabled = shouldAutoAnswerForLesson({
+    lessonId,
+    config: ui?.config,
+    autoJoinedLessons: repo?.autoJoinedLessons,
+    forceAutoAnswerLessons: repo?.forceAutoAnswerLessons,
+  });
+  if (autoGate && autoAnswerEnabled) {
     const ms = typeof waitMs === 'number' ? Math.max(0, waitMs) : calcAutoWaitMs();
     if (ms > 0) {
       const guard = (typeof endTime === 'number') ? Math.max(0, endTime - Date.now() - 80) : ms;
@@ -152,7 +178,6 @@ export async function submitAnswer(problem, result, submitOptions = {}) {
   const route = chooseAnswerRoute({ now, endTime, forceRetry });
 
   if (route === 'retry') {
-
     console.group('[雨课堂助手][DEBUG][answer] >>> 进入补交分支判断');
     console.log('problemId:', problem.problemId);
     console.log('pastDeadline:', pastDeadline, '(now=', now, ', endTime=', endTime, ')');
@@ -166,7 +191,6 @@ export async function submitAnswer(problem, result, submitOptions = {}) {
     const et = Number.isFinite(endTime)   ? endTime   : (ps?.endTime);
     console.log('最终用于 retry 的 st=', st, ' et=', et);
 
-    // 计算 dt
     const off  = Math.max(0, retryDtOffsetMs);
     let dt;
 

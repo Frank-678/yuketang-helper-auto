@@ -1,9 +1,10 @@
 // src/net/ws-interceptor.js
 import { gm } from '../core/env.js';
-import { actions } from '../state/actions.js';
+import { runtimeActionRef } from '../core/runtime-dispatch.js';
 import { repo } from '../state/repo.js';
 import { dispatchRealtimeMessage } from '../core/realtime-dispatch.js';
 import { confirmDanmuSend } from '../core/danmu-sender.js';
+import { isYuketangHostname } from '../core/yuketang-origin.js';
 
 // connectOrAttachLessonWS constructs a managed socket synchronously. During
 // that constructor call, do not mistake the current page route for a native
@@ -64,6 +65,11 @@ MyWebSocket.addHandler((ws, url) => {
     console.log('[雨课堂助手][INFO] 拦截WebSocket通信 - 环境:', envType);
     console.log('[雨课堂助手][INFO] WebSocket连接尝试:', url.href);
 
+    if (!isYuketangHostname(url.hostname)) {
+      console.log('[雨课堂助手][INFO] 忽略外部 WebSocket:', url.hostname);
+      return;
+    }
+
     // 更宽松的路径匹配
     const wsPath = url.pathname || '';
     const isRainClassroomWS =
@@ -80,12 +86,21 @@ MyWebSocket.addHandler((ws, url) => {
 
     const routeLessonId = lessonIdFromPath((gm.uw || window)?.location?.pathname || location.pathname);
     if (routeLessonId && !pendingManagedLessonId) {
+      const previousSocket = repo.lessonSockets.get(routeLessonId) || null;
       ws.__yktLessonId = routeLessonId;
+      ws.__yktManaged = false;
       repo.markLessonConnected(routeLessonId, ws);
+      repo.markLessonAutoJoined(routeLessonId, false);
+
+      // A foreground/native classroom connection owns the lesson once the user
+      // actually enters it. Retire only the superseded managed AutoJoin socket;
+      // never close another native socket here.
+      if (previousSocket && previousSocket !== ws && previousSocket.__yktManaged === true) {
+        try { previousSocket.close?.(); } catch {}
+      }
+
       const clearNativeSocket = () => {
-        if (repo.lessonSockets.get(routeLessonId) === ws) {
-          repo.markLessonDisconnected(routeLessonId, 'native-close');
-        }
+        repo.markLessonDisconnected(routeLessonId, 'native-close', ws);
       };
       ws.addEventListener('close', clearNativeSocket);
       ws.addEventListener('error', clearNativeSocket);
@@ -115,23 +130,23 @@ MyWebSocket.addHandler((ws, url) => {
           handlers: {
             onFetchTimeline(timeline, options) {
               console.log('[雨课堂助手][INFO] 收到时间线:', message.timeline);
-              actions.onFetchTimeline(timeline, options);
+              runtimeActionRef.current?.onFetchTimeline(timeline, options);
             },
             onUnlockProblem(problem, options) {
               console.log('[雨课堂助手][INFO] 收到解锁问题:', message.problem);
-              actions.onUnlockProblem(problem, options);
+              runtimeActionRef.current?.onUnlockProblem(problem, options);
             },
             onDanmu(danmu, options) {
               console.log('[雨课堂助手][INFO] 收到弹幕:', danmu?.danmu);
-              void actions.onDanmu(danmu, options);
+              void runtimeActionRef.current?.onDanmu(danmu, options);
             },
             onPublishEvent(event, options) {
               console.log('[雨课堂助手][INFO] 收到课堂发布:', event);
-              actions.onPublishEvent(event, options);
+              runtimeActionRef.current?.onPublishEvent(event, options);
             },
             onLessonFinished(options) {
               console.log('[雨课堂助手][INFO] 课程结束');
-              actions.onLessonFinished(options);
+              runtimeActionRef.current?.onLessonFinished(options);
             },
           },
         });
@@ -183,6 +198,7 @@ export function connectOrAttachLessonWS({ lessonId, auth }) {
     pendingManagedLessonId = null;
   }
   ws.__yktLessonId = String(lessonId);
+  ws.__yktManaged = true;
 
   ws.addEventListener('open', () => {
     try {
@@ -209,7 +225,7 @@ export function connectOrAttachLessonWS({ lessonId, auth }) {
   const cleanup = (reason) => {
     if (cleaned) return;
     cleaned = true;
-    repo.markLessonDisconnected(lessonId, reason);
+    repo.markLessonDisconnected(lessonId, reason, ws);
   };
   ws.addEventListener('close', () => {
     cleanup('close');

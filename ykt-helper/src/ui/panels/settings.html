@@ -35,7 +35,8 @@
 
         <div class="setting-item">
           <label for="kimi-api-key">API Key:</label>
-          <input type="password" id="kimi-api-key" placeholder="输入当前配置的 API Key">
+          <input type="password" id="kimi-api-key" autocomplete="new-password" placeholder="输入当前配置的 API Key">
+          <button type="button" id="ykt-ai-api-key-clear">清除已保存 Key</button>
         </div>
 
         <div class="setting-item">
@@ -59,7 +60,8 @@
         </div>
         <div class="setting-item">
           <label for="ykt-ai-ocr-api-key">OCR API Key:</label>
-          <input type="password" id="ykt-ai-ocr-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">
+          <input type="password" id="ykt-ai-ocr-api-key" autocomplete="new-password" placeholder="留空则复用当前 AI Profile 的 API Key">
+          <button type="button" id="ykt-ai-ocr-api-key-clear">清除已保存 Key</button>
           <small>仅用于课件 OCR；不填时自动回退到当前 AI Profile 的 API Key。</small>
         </div>
         <div class="setting-item">
@@ -69,7 +71,8 @@
         </div>
         <div class="setting-item">
           <label for="ykt-ai-translate-api-key">翻译 API Key:</label>
-          <input type="password" id="ykt-ai-translate-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">
+          <input type="password" id="ykt-ai-translate-api-key" autocomplete="new-password" placeholder="留空则复用当前 AI Profile 的 API Key">
+          <button type="button" id="ykt-ai-translate-api-key-clear">清除已保存 Key</button>
           <small>仅用于 OCR 结果翻译；留空时复用当前 AI Profile 的 API Key。</small>
         </div>
         <div class="setting-item">

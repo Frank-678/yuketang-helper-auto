@@ -1,5 +1,5 @@
 import tpl from './ai.html';
-import { ui } from '../ui-api.js';
+import { ui } from '../ui-context.js';
 import { repo } from '../../state/repo.js';
 import { queryAI, queryAIVision} from '../../ai/openai.js';
 import { captureSlideImage } from '../../capture/screenshoot.js';
@@ -7,6 +7,9 @@ import { parseAIAnswer } from '../../tsm/ai-format.js';
 import { actions, hasActiveAIProfile} from '../../state/actions.js'
 import { parseEditableAnswer, formatEditableAnswer } from '../../state/answer-editor.js';
 import { getCurrentMainPageSlideId, waitForVueReady, watchMainPageChange } from '../../core/vuex-helper.js';
+import { isProblemExpired } from '../../core/problem-view-state.js';
+import { onInternalEvent } from '../../core/internal-events.js';
+import { trustedUiHandler } from '../../core/trusted-ui-event.js';
 
 const L = (...a) => console.log('[雨课堂助手][DBG][ai]', ...a);
 const W = (...a) => console.warn('[雨课堂助手][WARN][ai]', ...a);
@@ -216,7 +219,7 @@ function normalizeRepoSlidesKeys(tag = 'ai.mount') {
 function asIdStr(v) { return v == null ? null : String(v); }
 function isMainPriority() {
   const v = ui?.config?.aiSlidePickPriority;
-  const ret = !(v === 'presentation');
+  const ret = v !== false && v !== 'presentation';
   L('isMainPriority?', { cfg: v, result: ret });
   return ret;
 }
@@ -259,9 +262,9 @@ export function mountAIPanel() {
   root = document.getElementById('ykt-ai-answer-panel');
 
   $('#ykt-ai-close')?.addEventListener('click', () => showAIPanel(false));
-  $('#ykt-ai-ask')?.addEventListener('click', askAIFusionMode);
-  $('#ykt-ai-force-answer')?.addEventListener('click', forceAIAnswerForCurrent);
-  $('#ykt-ai-submit')?.addEventListener('click', submitEditedAnswer);
+  $('#ykt-ai-ask')?.addEventListener('click', trustedUiHandler(askAIFusionMode));
+  $('#ykt-ai-force-answer')?.addEventListener('click', trustedUiHandler(forceAIAnswerForCurrent));
+  $('#ykt-ai-submit')?.addEventListener('click', trustedUiHandler(submitEditedAnswer));
   $('#ykt-ai-reset-edit')?.addEventListener('click', () => {
     if (lastAnswerContext?.parsed !== undefined) setEditableAnswer(lastAnswerContext.parsed);
   });
@@ -276,7 +279,7 @@ export function mountAIPanel() {
     W('Vue 实例初始化失败，将使用备用方案:', e);
   });
 
-  window.addEventListener('ykt:presentation:slide-selected', (ev) => {
+  onInternalEvent('presentation:slide-selected', (ev) => {
     L('收到小窗选页事件', ev?.detail);
     const sid = asIdStr(ev?.detail?.slideId);
     const imageUrl = ev?.detail?.imageUrl || null;
@@ -287,12 +290,12 @@ export function mountAIPanel() {
     renderQuestion();
   });
 
-  window.addEventListener('ykt:open-ai', () => {
+  onInternalEvent('open-ai', () => {
     L('收到打开 AI 面板事件');
     showAIPanel(true);
   });
 
-  window.addEventListener('ykt:ask-ai-for-slide', (ev) => {
+  onInternalEvent('ask-ai-for-slide', (ev) => {
     const detail = ev?.detail || {};
     const slideId = asIdStr(detail.slideId);
     const imageUrl = detail.imageUrl || '';
@@ -312,7 +315,7 @@ export function mountAIPanel() {
   });
 
   // ===== 手动多页提问（来自课件面板多选）=====
-  window.addEventListener('ykt:ask-ai-for-slides', (ev) => {
+  onInternalEvent('ask-ai-for-slides', (ev) => {
     const detail = ev?.detail || {};
     const slides = Array.isArray(detail.slides) ? detail.slides : [];
     if (!slides.length) return;
@@ -432,8 +435,7 @@ async function submitEditedAnswer() {
   }
 
   const status = currentProblemStatus(problem);
-  const endTime = Number(status?.endTime ?? problem.endTime);
-  const expired = Number.isFinite(endTime) && Date.now() >= endTime;
+  const expired = isProblemExpired(Date.now(), status?.endTime, problem.endTime);
   if (expired && !window.confirm('这道题已过截止时间，将使用强制补交接口。继续吗？')) return;
 
   const button = $('#ykt-ai-submit');
@@ -468,8 +470,7 @@ async function forceAIAnswerForCurrent() {
     return;
   }
   const status = currentProblemStatus(problem);
-  const endTime = Number(status?.endTime ?? problem.endTime);
-  const expired = Number.isFinite(endTime) && Date.now() >= endTime;
+  const expired = isProblemExpired(Date.now(), status?.endTime, problem.endTime);
   if (expired && !window.confirm('这道题已过截止时间，AI 将使用强制补交接口。继续吗？')) return;
 
   const button = $('#ykt-ai-force-answer');

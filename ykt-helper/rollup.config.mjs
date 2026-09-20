@@ -1,5 +1,3 @@
-import resolve from '@rollup/plugin-node-resolve';
-import commonjs from '@rollup/plugin-commonjs';
 import replace from '@rollup/plugin-replace';
 import string from '@bkuri/rollup-plugin-string';
 import terser from '@rollup/plugin-terser';
@@ -20,17 +18,8 @@ export default {
     inlineDynamicImports: true
   },
   plugins: [
-    // 允许 import 模板与样式为字符串（与现有用法一致）
+    // 生产源码只使用相对 ESM 导入；模板与样式仍作为字符串内联。
     string({ include: ['**/*.html', '**/*.css'] }),
-
-    // 解析依赖 / CJS 转 ESM
-    resolve({ 
-      browser: true, 
-      preferBuiltins: false,
-      // 确保所有依赖都被内联
-      exportConditions: ['browser']
-    }),
-    commonjs(),
 
     // 编译期替换
     replace({
@@ -56,11 +45,10 @@ export default {
       }
     })
   ],
-  
-  // 关键配置：禁用代码分割相关功能
-  external: [],  // 不外部化任何模块
-  
-  // 如果有 treeshaking 问题，可以适当调整
+
+  // 所有生产模块均由相对 ESM 导入进入单文件 bundle。
+  external: [],
+
   treeshake: {
     moduleSideEffects: true  // 保持模块副作用，避免过度摇树
   }

@@ -1,14 +1,17 @@
 // src/ai/deepseek.js
 import { gm } from '../core/env.js';
+import { assertSafeApiEndpoint } from '../core/remote-endpoint.js';
 
 export function queryDeepSeek(question, aiCfg) {
   const { apiKey, endpoint, model, temperature, maxTokens } = aiCfg || {};
   if (!apiKey) return Promise.reject(new Error('请先设置API密钥'));
 
+  const safeEndpoint = assertSafeApiEndpoint(endpoint);
+
   return new Promise((resolve, reject) => {
     gm.xhr({
       method: 'POST',
-      url: endpoint,
+      url: safeEndpoint,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,

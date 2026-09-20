@@ -1,56 +1,15 @@
 // src/ui/ui-api.js
 import { gm } from '../core/env.js';
-import { storage } from '../core/storage.js';
-import { DEFAULT_CONFIG } from '../core/types.js';
 import { repo } from '../state/repo.js';
-import { toast } from './toast.js';
+import { ui } from './ui-context.js';
 import * as SettingsPanel from './panels/settings.js';
 import * as AIPanel from './panels/ai.js';
 import * as PresPanel from './panels/presentation.js';
 import * as ProbListPanel from './panels/problem-list.js';
 import * as ActivePanel from './panels/active-problems.js';
 import * as TutorialPanel from './panels/tutorial.js';
-import { PROBLEM_TYPE_MAP } from '../core/types.js'
 import { getReminderChannels, getReminderVolume, isReminderEnabled } from '../core/reminder-preferences.js';
-
-const _config = Object.assign({}, DEFAULT_CONFIG, storage.get('config', {}));
-_config.ai.kimiApiKey = storage.get('kimiApiKey', _config.ai.kimiApiKey);
-_config.TYPE_MAP = _config.TYPE_MAP || PROBLEM_TYPE_MAP;
-if (typeof _config.autoJoinEnabled === 'undefined') _config.autoJoinEnabled = false;
-if (typeof _config.autoAnswerOnAutoJoin === 'undefined') _config.autoAnswerOnAutoJoin = true;
-if (typeof _config.autoRecoverUnanswered === 'undefined') _config.autoRecoverUnanswered = false;
-if (typeof _config.autoRecoverExpired === 'undefined') _config.autoRecoverExpired = false;
-if (typeof _config.autoScanUnanswered === 'undefined') _config.autoScanUnanswered = false;
-if (typeof _config.iftex === 'undefined') _config.iftex = true;
-if (typeof _config.ai === 'undefined' || !_config.ai) _config.ai = {};
-if (typeof _config.ai.ocrApi === 'undefined') _config.ai.ocrApi = '';
-if (typeof _config.ai.ocrApiKey === 'undefined') _config.ai.ocrApiKey = '';
-if (typeof _config.ai.translateApi === 'undefined') _config.ai.translateApi = '';
-if (typeof _config.ai.translateApiKey === 'undefined') _config.ai.translateApiKey = '';
-if (typeof _config.ai.translateModel === 'undefined') _config.ai.translateModel = '';
-if (typeof _config.notifyProblems === 'undefined') _config.notifyProblems = true;           
-if (typeof _config.notifyPopupDuration === 'undefined') _config.notifyPopupDuration = 5000; 
-if (typeof _config.notifyVolume === 'undefined') _config.notifyVolume = 0.6;                
-if (typeof _config.customNotifyAudioSrc === 'undefined') _config.customNotifyAudioSrc = ''; 
-if (typeof _config.customNotifyAudioName === 'undefined') _config.customNotifyAudioName = ''; 
-_config.autoJoinEnabled = !!_config.autoJoinEnabled;
-_config.autoAnswerOnAutoJoin = !!_config.autoAnswerOnAutoJoin;
-_config.autoRecoverUnanswered = !!_config.autoRecoverUnanswered;
-_config.autoRecoverExpired = !!_config.autoRecoverExpired;
-_config.autoScanUnanswered = !!_config.autoScanUnanswered;
-
-function saveConfig() { 
-  try {
-      storage.set('config', {
-        ...this.config,
-        autoJoinEnabled: !!this.config.autoJoinEnabled,
-        autoAnswerOnAutoJoin: !!this.config.autoAnswerOnAutoJoin,
-      });
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent?.(new CustomEvent('ykt:auto-answer-config-changed'));
-      }
-    } catch (e) { console.warn('[ui.saveConfig] failed', e); }
-}
+import { onInternalEvent } from '../core/internal-events.js';
 
 // 面板层级管理
 let currentZIndex = 10000000;
@@ -102,10 +61,7 @@ function enableNotifyDrag(wrapper, handle, bringToFront) {
   });
 }
 
-export const ui = {
-  get config() { return _config; },
-  saveConfig,
-
+Object.assign(ui, {
   updatePresentationList: PresPanel.updatePresentationList,
   updateSlideView: PresPanel.updateSlideView,
   askAIForCurrent: AIPanel.askAIForCurrent,
@@ -171,7 +127,7 @@ export const ui = {
     ProbListPanel.mountProblemListPanel();
     ActivePanel.mountActiveProblemsPanel();
     TutorialPanel.mountTutorialPanel(); 
-    window.addEventListener('ykt:open-ai', () => this.showAIPanel(true));
+    onInternalEvent('open-ai', () => this.showAIPanel(true));
   },
 
   // 题目提醒
@@ -405,9 +361,16 @@ export const ui = {
 
   // 供设置页调用：写入/清除自定义提示音
   setCustomNotifyAudio({ src, name }) {
+    const previousSrc = this.config.customNotifyAudioSrc;
+    const previousName = this.config.customNotifyAudioName;
     this.config.customNotifyAudioSrc = src || '';
     this.config.customNotifyAudioName = name || '';
-    this.saveConfig();
+    if (this.saveConfig() === false) {
+      this.config.customNotifyAudioSrc = previousSrc;
+      this.config.customNotifyAudioName = previousName;
+      return false;
+    }
+    return true;
   },
 
   getProblemDetail(problem) {
@@ -425,13 +388,14 @@ export const ui = {
       : false);
   },
 
-  toast,
   nativeNotify: gm.notify,
 
   // Buttons 状态
   updateAutoAnswerBtn() {
     const el = document.getElementById('ykt-btn-auto-answer');
     if (!el) return;
-    if (_config.autoAnswer) el.classList.add('active'); else el.classList.remove('active');
+    if (this.config.autoAnswer) el.classList.add('active'); else el.classList.remove('active');
   },
-};
+});
+
+export { ui };

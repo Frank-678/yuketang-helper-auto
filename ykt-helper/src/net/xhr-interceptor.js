@@ -1,6 +1,7 @@
 // src/net/xhr-interceptor.js
 import { gm } from '../core/env.js';
-import { actions } from '../state/actions.js';
+import { runtimeActionRef } from '../core/runtime-dispatch.js';
+import { isYuketangHostname } from '../core/yuketang-origin.js';
 
 export function installXHRInterceptor() {
   class MyXHR extends XMLHttpRequest {
@@ -30,6 +31,7 @@ export function installXHRInterceptor() {
   }
 
   MyXHR.addHandler((xhr, method, url) => {
+    if (!isYuketangHostname(url.hostname)) return;
     const envType = detectEnvironmentAndAdaptAPI();
     const pathname = url.pathname || '';
     console.log('[雨课堂助手][INFO] XHR请求:', method, pathname, url.search);
@@ -44,7 +46,7 @@ export function installXHRInterceptor() {
         const id = url.searchParams.get('presentation_id');
         console.log('[雨课堂助手][INFO] 课件响应:', resp);
         if (resp && (resp.code === 0 || resp.success)) {
-          actions.onPresentationLoaded(id, resp.data || resp.result);
+          runtimeActionRef.current?.onPresentationLoaded(id, resp.data || resp.result);
         }
       });
       return;
@@ -60,7 +62,7 @@ export function installXHRInterceptor() {
         try {
           const { problemId, result } = JSON.parse(payload || '{}');
           if (resp && (resp.code === 0 || resp.success)) {
-            actions.onAnswerProblem(problemId, result);
+            runtimeActionRef.current?.onAnswerProblem(problemId, result);
           }
         } catch (e) {
           console.error('[雨课堂助手][ERR] 解析答题响应失败:', e);
@@ -76,7 +78,7 @@ export function installXHRInterceptor() {
           const body = JSON.parse(payload || '{}');
           const first = Array.isArray(body?.problems) ? body.problems[0] : null;
           if (resp?.code === 0 && first?.problemId) {
-            actions.onAnswerProblem(first.problemId, first.result);
+            runtimeActionRef.current?.onAnswerProblem(first.problemId, first.result);
           }
         } catch {}
       });

@@ -34,7 +34,16 @@ export async function captureSlideImage(slideId) {
   try {
     console.log('[captureSlideImage] 获取幻灯片图片:', slideId);
     
-    const slide = repo.slides.get(slideId);
+    const slideKey = slideId == null ? '' : String(slideId);
+    let slide = repo.slides.get(slideId) || repo.slides.get(slideKey);
+    if (!slide && slideKey) {
+      for (const [key, candidate] of repo.slides) {
+        if (String(key) === slideKey) {
+          slide = candidate;
+          break;
+        }
+      }
+    }
     if (!slide) {
       console.error('[captureSlideImage] 找不到幻灯片:', slideId);
       return null;

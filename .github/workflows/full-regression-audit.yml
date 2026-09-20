@@ -1,0 +1,135 @@
+name: Full Regression
+
+on:
+  push:
+    paths:
+      - 'ykt-helper/**'
+      - '.github/workflows/full-regression-audit.yml'
+  pull_request:
+    paths:
+      - 'ykt-helper/**'
+      - '.github/workflows/full-regression-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legacy:
+    name: Legacy regression
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --no-audit --no-fund || {
+            echo 'npm ci failed once; verifying cache and retrying once' >&2
+            npm cache verify || true
+            npm ci --no-audit --no-fund
+          }
+      - run: npm run test:legacy
+
+  unit:
+    name: Unit matrices
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --no-audit --no-fund || {
+            echo 'npm ci failed once; verifying cache and retrying once' >&2
+            npm cache verify || true
+            npm ci --no-audit --no-fund
+          }
+      - run: npm run test:unit
+
+  contract:
+    name: Browser and network contracts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --no-audit --no-fund || {
+            echo 'npm ci failed once; verifying cache and retrying once' >&2
+            npm cache verify || true
+            npm ci --no-audit --no-fund
+          }
+      - run: npm run test:contract
+
+  scenario:
+    name: Cross-module scenarios
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --no-audit --no-fund || {
+            echo 'npm ci failed once; verifying cache and retrying once' >&2
+            npm cache verify || true
+            npm ci --no-audit --no-fund
+          }
+      - run: npm run test:scenario
+
+  build-contract:
+    name: Build and userscript contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          npm ci --no-audit --no-fund || {
+            echo 'npm ci failed once; verifying cache and retrying once' >&2
+            npm cache verify || true
+            npm ci --no-audit --no-fund
+          }
+      - name: Build without circular dependency warnings
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/ykt-build.log
+          if grep -q 'Circular dependencies' /tmp/ykt-build.log; then
+            echo 'Rollup reported circular dependencies' >&2
+            exit 1
+          fi
+      - run: npm run test:build
