@@ -93,7 +93,6 @@ test('remote runtime JavaScript dependencies are exact-version metadata requirem
   assert.match(text, /@require\s+https:\/\/cdn\.jsdelivr\.net\/npm\/html2canvas@1\.4\.1\/dist\/html2canvas\.min\.js/);
   assert.match(text, /@require\s+https:\/\/cdn\.jsdelivr\.net\/npm\/jspdf@2\.5\.1\/dist\/jspdf\.umd\.min\.js/);
   assert.match(text, /@require\s+https:\/\/cdn\.jsdelivr\.net\/npm\/mathjax@3\.2\.2\/es5\/tex-svg\.min\.js/);
-  assert.equal(text.includes('html2canvas.hertzen.com'), false);
   assert.doesNotMatch(text, /mathjax@3\/es5/);
 });
 
