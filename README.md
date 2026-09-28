@@ -5,8 +5,8 @@
   <a href="https://github.com/ZaytsevZY/yuketang-helper-auto/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="license"/>
   </a>
-  <a href="./release/ykt-helper-1214.user.js">
-    <img src="https://img.shields.io/badge/version-1.21.4-blue.svg" alt="版本">
+  <a href="./release/ykt-helper-1217.user.js">
+    <img src="https://img.shields.io/badge/version-1.21.7-blue.svg" alt="版本">
   </a>
   <a href="#">
     <img src="https://img.shields.io/badge/platform-Chrome%20%7C%20Edge-green.svg" alt="适配平台">
@@ -48,7 +48,7 @@
   - 使用edge，你需要打开**拓展-管理拓展-开发者模式**，再开启篡改猴插件中的**允许注入脚本**和**允许访问文件URL权限**
   - 使用chrome，你需要打开 **（右上角三点）-拓展程序-管理拓展程序-开发者模式**，再开启插件面板中的**允许运行用户脚本**和**允许访问文件网址**
 
-- 可直接[安装此 fork 的 1.21.4 发布脚本](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper-1214.user.js)。
+- 可直接[安装此 fork 的 1.21.7 发布脚本](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/rebuild/1.21.7-from-1.21.4/release/ykt-helper-1217.user.js)。
 
 - 也可以[安装 GreasyFork 的稳定版本](https://update.greasyfork.org/scripts/531469/AI%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B.user.js)；它通常不是最新版本。
 
@@ -60,7 +60,7 @@
 
 - 或手动创建新脚本，将 `release/ykt-helper-<版本号>.user.js` 的内容复制到篡改猴的新建脚本中。
 
-- 当前构建版本为 `1.21.4`，支持：
+- 当前构建版本为 `1.21.7`，支持：
 
   - `148.0.7778.98-chrome`及以下的chrome
 

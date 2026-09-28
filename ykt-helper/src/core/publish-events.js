@@ -108,7 +108,10 @@ function getDetail(message, entity) {
 
 function getCategory(op) {
   if (op === 'unlockproblem') return null;
-  if (op === 'probleminfo') return 'assessment';
+  // probleminfo 是页面打开题目时自己请求的计时回包，不是老师的发布动作。
+  if (op === 'probleminfo') return null;
+  // 雨课堂课堂页用 newquiz / newpaper 推送试卷与考试。
+  if (op === 'newquiz' || op === 'newpaper') return 'assessment';
   // 结果、关闭、展示、更新等操作同样会带 problem，不能当成新题发布。
   if (includesOneOf(op, ASSESSMENT_MARKERS)) {
     return ASSESSMENT_PUBLISH_ACTION.test(op) ? 'assessment' : null;
@@ -166,6 +169,15 @@ export function getRealtimeEvent(message) {
     return { kind: 'unlockproblem', problem };
   }
   if (op === 'lessonfinished') return { kind: 'lessonfinished' };
+  // 老师提前结束题目：{ op: 'problemfinished', prob }
+  if (op === 'problemfinished') {
+    return { kind: 'problemfinished', problemId: message?.prob ?? message?.problemid ?? message?.problemId };
+  }
+  // 老师延长作答时间：{ op: 'extendtime', problem: { prob, extend, limit, dt, now } }，extend=-1 表示改为不限时
+  if (op === 'extendtime') {
+    const p = message?.problem && typeof message.problem === 'object' ? message.problem : message;
+    return { kind: 'extendtime', problem: p };
+  }
 
   const event = classifyPublishEvent(message);
   return event ? { kind: 'publish', event } : null;

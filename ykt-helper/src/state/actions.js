@@ -16,6 +16,8 @@ import { isReminderEnabled } from '../core/reminder-preferences.js';
 import { getProblemEndTime } from './problem-timing.js';
 import { createDanmuFollowController } from '../core/danmu-follow.js';
 import { sendDanmuText } from '../core/danmu-sender.js';
+import { storage } from '../core/storage.js';
+import { diag } from '../core/diagnostics.js';
 
 let _autoLoopStarted = false;
 let _autoJoinStarted = false;
@@ -153,7 +155,52 @@ export function hasActiveAIProfile(aiCfg) {
   return !!cfg.kimiApiKey;
 }
 
-// 融合模式自动答题
+// 题目是否仍可作答：老师已结束（problemfinished）或已过截止时间都算不可作答。
+function isProblemClosed(status, now = Date.now()) {
+  if (!status) return true;
+  if (status.finished) return true;
+  return Number.isFinite(status.endTime) && now >= status.endTime;
+}
+
+// 单次 AI 请求的超时：不超过剩余作答时间，也不短于 15 秒。
+function aiTimeoutFor(status) {
+  if (!Number.isFinite(status?.endTime)) return 45000;
+  return Math.max(15000, Math.min(45000, status.endTime - Date.now() - 3000));
+}
+
+function isTransientAIError(e) {
+  return !!(e?.timeout || e?.status === 429 || /网络请求失败|超时/.test(String(e?.message || '')));
+}
+
+const AUTO_ANSWER_MAX_ATTEMPTS = 3;
+
+// 时间线里超过这个时长的不限时题视为旧题：刷新后只恢复状态，不再提醒/自动作答。
+const STALE_UNTIMED_TIMELINE_MS = 30 * 60 * 1000;
+
+function problemKey(problemId) {
+  return problemId === undefined || problemId === null ? '' : String(problemId);
+}
+
+// 记录本节课老师已结束的题目，刷新页面后时间线回放不会把它们当成新题。
+function finishedStorageKey() {
+  return `finished-problems-${repo.currentLessonId || 'unknown'}`;
+}
+
+function isKnownFinished(problemId) {
+  const list = storage.get(finishedStorageKey(), []);
+  return Array.isArray(list) && list.includes(problemKey(problemId));
+}
+
+function rememberFinished(problemId) {
+  const key = problemKey(problemId);
+  if (!key) return;
+  const list = storage.get(finishedStorageKey(), []);
+  const next = Array.isArray(list) ? list.filter(x => x !== key) : [];
+  next.push(key);
+  storage.set(finishedStorageKey(), next.slice(-200));
+}
+
+// 融合模式自动答题；AI 超时/限流/断网等临时错误在题目仍开放时重试。
 async function handleAutoAnswerInternal(problem) {
   const status = repo.problemStatus.get(problem.problemId);
   if (!status || status.answering || problem.result) {
@@ -164,14 +211,26 @@ async function handleAutoAnswerInternal(problem) {
     });
     return;
   }
-  
-  if (Number.isFinite(status.endTime) && Date.now() >= status.endTime) {
-    console.log('[雨课堂助手][WARN][AutoAnswer] 跳过：已超时');
-    return;
+
+  for (let attempt = 1; attempt <= AUTO_ANSWER_MAX_ATTEMPTS; attempt++) {
+    const outcome = await attemptAutoAnswer(problem, status, attempt);
+    if (outcome !== 'retry') return;
+    if (isProblemClosed(status) || problem.result) return;
+    console.warn(`[雨课堂助手][WARN][AutoAnswer] 临时错误，2 秒后第 ${attempt + 1} 次尝试`);
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
+
+async function attemptAutoAnswer(problem, status, attempt) {
+  if (isProblemClosed(status)) {
+    console.log('[雨课堂助手][WARN][AutoAnswer] 跳过：', status.finished ? '老师已结束该题' : '已超时');
+    diag('auto-skip', { problemId: problem.problemId, reason: status.finished ? 'finished' : 'expired' });
+    return 'stop';
   }
 
   status.answering = true;
-  notifyAutoAnswer('auto-answer-started', problem);
+  if (attempt === 1) notifyAutoAnswer('auto-answer-started', problem);
+  diag('auto-start', { problemId: problem.problemId, attempt, slideId: status.slideId });
 
   try {
     console.log('[雨课堂助手][INFO][AutoAnswer] =================================');
@@ -192,6 +251,7 @@ async function handleAutoAnswerInternal(problem) {
         endTime: status.endTime,
         forceRetry: false,
         lessonId: repo.currentLessonId,
+        autoGate: false,
       });
 
       // 更新状态与UI
@@ -204,7 +264,7 @@ async function handleAutoAnswerInternal(problem) {
       showAutoAnswerPopup(problem, '（本地默认答案：无 API Key）');
 
       console.log('[雨课堂助手][INFO][AutoAnswer] 默认答案提交流程结束');
-      return; // 提前返回，避免继续走图像+AI流程
+      return 'done'; // 提前返回，避免继续走图像+AI流程
     }
 
     const slideId = status.slideId;
@@ -222,8 +282,10 @@ async function handleAutoAnswerInternal(problem) {
       if (!fallbackImage) {
         status.answering = false;
         console.error('[雨课堂助手][ERR][AutoAnswer] 所有截图方法都失败');
+        diag('auto-failed', { problemId: problem.problemId, reason: 'no-image' });
         notifyAutoAnswer('auto-answer-failed', problem, '无法获取题目图像，已跳过自动作答。');
-        return ui.toast('无法获取题目图像，跳过自动作答', 3000);
+        ui.toast('无法获取题目图像，跳过自动作答', 3000);
+        return 'stop';
       }
       
       imageBase64 = fallbackImage;
@@ -236,49 +298,85 @@ async function handleAutoAnswerInternal(problem) {
     const hasTextInfo = problem.body && problem.body.trim();
     const textPrompt = formatProblemForVision(problem, PROBLEM_TYPE_MAP, hasTextInfo);
     
-    // 调用 AI
+    // 调用 AI：自动作答用单步视觉请求（免费档 RPM 很低，两步流程会触发 429）
     ui.toast('AI 正在分析题目...', 2000);
-    const aiAnswer = await queryAIVision(imageBase64, textPrompt, ui.config.ai);
+    const aiStartedAt = Date.now();
+    diag('ai-request', { problemId: problem.problemId, attempt });
+    const aiAnswer = await queryAIVision(imageBase64, textPrompt, ui.config.ai, {
+      disableTwoStep: ui.config.autoAnswerTwoStep !== true,
+      timeout: aiTimeoutFor(status),
+      problemType: problem.problemType,
+    });
     console.log('[雨课堂助手][INFO][AutoAnswer] AI回答:', aiAnswer);
-    
+    diag('ai-response', { problemId: problem.problemId, ms: Date.now() - aiStartedAt, text: aiAnswer });
+
     // 解析答案
     const parsed = parseAIAnswer(problem, aiAnswer);
     console.log('[雨课堂助手][INFO][AutoAnswer] 解析结果:', parsed);
-    
+
     if (!parsed) {
       status.answering = false;
       console.error('[雨课堂助手][ERR][AutoAnswer] 解析失败，AI回答格式不正确');
+      diag('auto-failed', { problemId: problem.problemId, reason: 'parse' });
       notifyAutoAnswer('auto-answer-failed', problem, '无法解析 AI 返回的答案，已跳过自动作答。');
-      return ui.toast('无法解析AI答案，请检查格式', 3000);
+      ui.toast('无法解析AI答案，请检查格式', 3000);
+      return 'stop';
+    }
+
+    // AI 思考期间老师可能已经结束本题，此时普通提交只会得到 50026。
+    if (status.finished) {
+      status.answering = false;
+      console.warn('[雨课堂助手][WARN][AutoAnswer] AI 返回时老师已结束该题，未提交:', JSON.stringify(parsed));
+      diag('auto-skip', { problemId: problem.problemId, reason: 'finished-during-ai', answer: parsed });
+      notifyAutoAnswer('auto-answer-failed', problem, '老师已结束该题，AI 答案未提交，可在题目列表中强制补交。');
+      return 'stop';
+    }
+    // 用户在 AI 思考期间自己交了答案，不再覆盖。
+    if (problem.result) {
+      status.answering = false;
+      status.done = true;
+      console.log('[雨课堂助手][INFO][AutoAnswer] 用户已手动作答，AI 答案不再提交');
+      diag('auto-skip', { problemId: problem.problemId, reason: 'answered-manually' });
+      return 'stop';
     }
 
     console.log('[雨课堂助手][INFO][AutoAnswer] 准备提交答案:', JSON.stringify(parsed));
-    
-    // 提交答案
+
+    // 提交答案（等待时间已在排队阶段计入，这里不再二次等待）
     await submitAnswer(problem, parsed, {
       startTime: status.startTime,
       endTime: status.endTime,
       forceRetry: false,
-      lessonId: repo.currentLessonId
+      lessonId: repo.currentLessonId,
+      autoGate: false,
     });
-    
+
     console.log('[雨课堂助手][INFO][AutoAnswer] 提交成功');
-    
+    diag('auto-submitted', { problemId: problem.problemId, answer: parsed });
+
     // 更新状态
     actions.onAnswerProblem(problem.problemId, parsed);
     status.done = true;
     status.answering = false;
     notifyAutoAnswer('auto-answer-succeeded', problem);
-    
+
     ui.toast(`自动作答完成`, 3000);
     showAutoAnswerPopup(problem, aiAnswer);
-    
+    return 'done';
+
   } catch (e) {
     console.error('[雨课堂助手][ERR][AutoAnswer] 失败:', e);
     console.error('[雨课堂助手][ERR][AutoAnswer] 错误堆栈:', e.stack);
     status.answering = false;
+    const transient = isTransientAIError(e);
+    diag('auto-error', { problemId: problem.problemId, attempt, transient, message: e?.message });
+    if (transient && attempt < AUTO_ANSWER_MAX_ATTEMPTS && !isProblemClosed(status)) {
+      ui.toast(`AI 暂时不可用（${e.message}），稍后重试`, 3000);
+      return 'retry';
+    }
     notifyAutoAnswer('auto-answer-failed', problem, `自动作答失败：${e?.message || '未知错误'}`);
     ui.toast(`自动作答失败: ${e.message}`, 4000);
+    return 'stop';
   }
 }
 
@@ -302,25 +400,31 @@ export function startAutoAnswerLoop() {
 
 export const actions = {
   onFetchTimeline(timeline, options = {}) {
-    for (const piece of Array.isArray(timeline) ? timeline : []) {
-      if (piece?.type === 'problem') this.onUnlockProblem(piece, options);
-    }
+    const pieces = (Array.isArray(timeline) ? timeline : []).filter(piece => piece?.type === 'problem');
+    diag('timeline', { problems: pieces.map(p => ({ prob: p.prob, dt: p.dt, limit: p.limit })) });
+    for (const piece of pieces) this.onUnlockProblem(piece, { ...options, source: 'timeline' });
   },
 
   onPresentationLoaded(id, data) {
     repo.setPresentation(id, data);
     const pres = repo.presentations.get(id);
+    let problems = 0;
     for (const slide of pres.slides) {
       repo.upsertSlide(slide);
       if (slide.problem) {
+        problems++;
         repo.upsertProblem(slide.problem);
         repo.pushEncounteredProblem(slide.problem, slide, id);
       }
     }
+    diag('presentation', { id, slides: pres.slides?.length || 0, problems });
     ui.updatePresentationList();
   },
 
-  onUnlockProblem(data, { notificationOnly = false } = {}) {
+  // 实时 unlockproblem 与时间线回放都会走到这里。时间线回放是页面刷新/迟到、
+  // 以及“课件数据晚于解锁事件到达”时唯一能补上题目的途径，因此仍然可以触发
+  // 自动作答；但同一道题只处理一次，老师已结束或很久以前的不限时旧题不再触发。
+  onUnlockProblem(data, { notificationOnly = false, source = 'live' } = {}) {
     const payload = data && typeof data === 'object' ? data : {};
     const problemId = firstValue(
       payload.prob,
@@ -333,30 +437,50 @@ export const actions = {
     const slideId = firstValue(payload.sid, payload.slideId, payload.slide?.id);
     const problem = repo.problems.get(problemId);
     const slide = repo.slides.get(slideId);
+    if (source === 'live') diag('unlock', { problemId, slideId, limit: payload.limit, loaded: !!(problem && slide) });
     if (!problem || !slide) {
       if (notificationOnly) return notifyProblemStart(payload, problem, slide);
-      console.log('[雨课堂助手][ERR][onUnlockProblem] 题目或幻灯片不存在');
+      // 课件数据还没到：稍后 fetchtimeline 回放会再次带上这道题。
+      console.log('[雨课堂助手][ERR][onUnlockProblem] 题目或幻灯片不存在，等待课件加载后的时间线回放');
       return false;
     }
 
-    console.log('[雨课堂助手][DBG][onUnlockProblem] 题目解锁');
+    const endTime = getProblemEndTime(payload.dt, payload.limit);
+    const previous = repo.problemStatus.get(problemId);
+
+    // 同一道题的重复事件（多条连接、多次时间线回放）只刷新时间，不打断已排队/进行中的作答。
+    if (previous && (source !== 'live' || previous.answering || previous.autoAnswerTime !== null || previous.done)) {
+      if (Number.isFinite(Number(payload.dt))) previous.startTime = payload.dt;
+      if (source === 'live' || !previous.finished) previous.endTime = endTime;
+      if (source === 'live' && previous.finished && !previous.done) previous.finished = false;
+      return false;
+    }
+
+    console.log(`[雨课堂助手][DBG][onUnlockProblem] ${source === 'live' ? '题目解锁' : '时间线中的题目'}`);
     console.log('[雨课堂助手][DBG][onUnlockProblem] 题目ID:', problemId);
     console.log('[雨课堂助手][DBG][onUnlockProblem] 幻灯片ID:', slideId);
     console.log('[雨课堂助手][DBG][onUnlockProblem] 课件ID:', payload.pres);
 
+    const startTime = Number(payload.dt);
+    const staleUntimed = source !== 'live'
+      && !Number.isFinite(endTime)
+      && Number.isFinite(startTime)
+      && Date.now() - startTime > STALE_UNTIMED_TIMELINE_MS;
     const status = {
       presentationId: payload.pres,
       slideId,
       startTime: payload.dt,
-      endTime: getProblemEndTime(payload.dt, payload.limit),
+      endTime,
       done: !!problem.result,
       autoAnswerTime: null,
       answering: false,
+      finished: source !== 'live' && (isKnownFinished(problemId) || staleUntimed),
     };
     repo.problemStatus.set(problemId, status);
 
-    if ((Number.isFinite(status.endTime) && Date.now() > status.endTime) || problem.result) {
-      console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已过期或已作答，跳过');
+    if ((Number.isFinite(status.endTime) && Date.now() > status.endTime) || problem.result || status.finished) {
+      console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已过期、已结束或已作答，跳过');
+      if (source !== 'live') ui.updateActiveProblems();
       return;
     }
 
@@ -366,14 +490,45 @@ export const actions = {
     if (ui.config.autoAnswer) {
       const delay = ui.config.autoAnswerDelay + randInt(0, ui.config.autoAnswerRandomDelay);
       status.autoAnswerTime = Date.now() + delay;
-      
+      diag('auto-scheduled', { problemId, source, delayMs: delay, endTime: status.endTime });
+
       console.log(`[雨课堂助手][INFO][onUnlockProblem] 将在 ${Math.floor(delay / 1000)} 秒后自动作答`);
       ui.toast(`将在 ${Math.floor(delay / 1000)} 秒后使用融合模式自动作答`, 3000);
       notifyAutoAnswer('auto-answer-scheduled', problem, `将在约 ${Math.floor(delay / 1000)} 秒后开始自动作答。`);
     }
-    
+
     ui.updateActiveProblems();
     return notified;
+  },
+
+  // 老师提前结束题目：取消排队中的自动作答，并记住它，刷新后也不再触发。
+  onProblemFinished(problemId) {
+    if (problemId === undefined || problemId === null) return;
+    rememberFinished(problemId);
+    const status = repo.problemStatus.get(problemId) || repo.problemStatus.get(problemKey(problemId));
+    diag('problem-finished', { problemId, hadStatus: !!status, answering: !!status?.answering, pending: status?.autoAnswerTime ?? null });
+    if (!status) return;
+    status.finished = true;
+    if (status.autoAnswerTime !== null && !status.done) {
+      status.autoAnswerTime = null;
+      console.log('[雨课堂助手][INFO][onProblemFinished] 老师已结束该题，取消排队中的自动作答:', problemId);
+    }
+    ui.updateActiveProblems();
+  },
+
+  // 老师延时：{ prob, extend, limit }，extend=-1 表示改为不限时。
+  onExtendTime(payload) {
+    const problemId = firstValue(payload?.prob, payload?.problemId, payload?.problemid);
+    const status = repo.problemStatus.get(problemId);
+    diag('extend-time', { problemId, extend: payload?.extend, limit: payload?.limit, hadStatus: !!status });
+    if (!status) return;
+    if (Number(payload?.extend) === -1 || Number(payload?.limit) === -1) {
+      status.endTime = null;
+    } else {
+      const next = getProblemEndTime(status.startTime ?? payload?.dt, payload?.limit);
+      if (next !== null) status.endTime = next;
+    }
+    ui.updateActiveProblems();
   },
 
   onPublishEvent(event) {

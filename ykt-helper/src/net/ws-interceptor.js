@@ -3,6 +3,7 @@ import { gm } from '../core/env.js';
 import { actions } from '../state/actions.js';
 import { repo } from '../state/repo.js';
 import { dispatchRealtimeMessage } from '../core/realtime-dispatch.js';
+import { diag } from '../core/diagnostics.js';
 
 function lessonIdFromPath(pathname = '') {
   const match = String(pathname).match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
@@ -78,6 +79,15 @@ MyWebSocket.addHandler((ws, url) => {
     ws.listen((message) => {
       try {
         console.log('[雨课堂助手][INFO] WebSocket接收:', message);
+        if (message?.op && message.op !== 'xintiao' && message.op !== 'newdanmu') {
+          diag('ws', {
+            op: message.op,
+            problem: message.problem,
+            prob: message.prob,
+            presentation: message.presentation,
+            timeline: Array.isArray(message.timeline) ? message.timeline.length : undefined,
+          });
+        }
         const dispatched = dispatchRealtimeMessage(message, {
           getRuntimeMode,
           lessonId: getSocketLessonId(ws),
@@ -101,6 +111,14 @@ MyWebSocket.addHandler((ws, url) => {
             onLessonFinished(options) {
               console.log('[雨课堂助手][INFO] 课程结束');
               actions.onLessonFinished(options);
+            },
+            onProblemFinished(problemId, options) {
+              console.log('[雨课堂助手][INFO] 老师结束题目:', problemId);
+              actions.onProblemFinished(problemId, options);
+            },
+            onExtendTime(problem, options) {
+              console.log('[雨课堂助手][INFO] 题目延时:', problem);
+              actions.onExtendTime(problem, options);
             },
           },
         });

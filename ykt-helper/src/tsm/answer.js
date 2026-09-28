@@ -1,5 +1,6 @@
 import { ui } from '../ui/ui-api.js';
 import { repo } from '../state/repo.js';
+import { diag } from '../core/diagnostics.js';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, Math.max(0, ms|0))); }
 function calcAutoWaitMs() {
@@ -74,6 +75,7 @@ export async function answerProblem(problem, result, options = {}) {
   };
 
   const resp = await xhrPost(url, payload, headers);
+  diag('submit-answer', { problemId: problem.problemId, code: resp.code, msg: resp.msg });
   if (resp.code === 0) return resp;
   throw new Error(`${resp.msg} (${resp.code})`);
 }
@@ -99,6 +101,7 @@ export async function retryAnswer(problem, result, dt, options = {}) {
   };
 
   const resp = await xhrPost(url, payload, headers);
+  diag('submit-retry', { problemId: problem.problemId, code: resp.code, msg: resp.msg, success: resp?.data?.success });
   if (resp.code !== 0) {
     throw new Error(`${resp.msg} (${resp.code})`);
   }

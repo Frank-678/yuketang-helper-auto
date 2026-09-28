@@ -8,6 +8,7 @@ import { actions } from './state/actions.js';
 import { ui } from './ui/ui-api.js'; 
 import { gm } from './core/env.js';
 import { getRuntimeMode, installDesktopRouteGuard, shouldStartDesktopRuntime } from './core/runtime-mode.js';
+import { diag, exportDiagnostics, downloadDiagnostics, clearDiagnostics } from './core/diagnostics.js';
 
 function loadFA() {
   const link = document.createElement('link');
@@ -16,12 +17,15 @@ function loadFA() {
   document.head.appendChild(link);
 }
 
+// 脚本注入时文档的状态；document-start 正常注入时为 'loading'。
+const INJECTED_READY_STATE = document.readyState;
+
 function maybeAutoReloadOnMount() {
   try {
     // If the script is mounted after DOM is already ready, reload once so XHR/WS interceptors can arm early.
     // Guarded by sessionStorage to avoid infinite reload loops.
     const key = '__ykt_helper_auto_reload_once__';
-    if (document.readyState === 'loading') return false;
+    if (INJECTED_READY_STATE === 'loading') return false;
     if (!window.sessionStorage) return false;
     if (window.sessionStorage.getItem(key) === '1') return false;
 
@@ -74,6 +78,15 @@ function startDesktopRuntime() {
   desktopStarted = true;
   if (maybeAutoReloadOnMount()) return;
 
+  diag('boot', { version: __SCRIPT_VERSION__, readyState: INJECTED_READY_STATE, autoAnswer: !!ui.config.autoAnswer });
+  try {
+    // 控制台：__yktHelperDiag.download() 导出诊断日志
+    (gm.uw || window).__yktHelperDiag = {
+      dump: () => exportDiagnostics({ version: __SCRIPT_VERSION__ }),
+      download: () => downloadDiagnostics({ version: __SCRIPT_VERSION__ }),
+      clear: clearDiagnostics,
+    };
+  } catch {}
   startPeriodicReload({ intervalMs: 1 * 60 * 1000, onlyWhenHidden: false, skipLessonPages: true });
   loadFA();
   injectStyles();
