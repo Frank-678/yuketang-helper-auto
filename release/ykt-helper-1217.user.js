@@ -314,13 +314,17 @@
         ...data
       });
       const key = this.currentLessonId ? `presentations-${this.currentLessonId}` : "presentations";
-      storage.alterMap(key, m => {
-        m.set(id, data);
-        // 仍然做容量裁剪
-                const max = storage.get("config", {})?.maxPresentations ?? 5;
-        const excess = m.size - max;
-        if (excess > 0) [ ...m.keys() ].slice(0, excess).forEach(k => m.delete(k));
-      });
+      try {
+        storage.alterMap(key, m => {
+          m.set(id, data);
+          // 仍然做容量裁剪
+                    const max = storage.get("config", {})?.maxPresentations ?? 5;
+          const excess = m.size - max;
+          if (excess > 0) [ ...m.keys() ].slice(0, excess).forEach(k => m.delete(k));
+        });
+      } catch {
+        // QuotaExceededError: in-memory map above already populated; persist later when space frees.
+      }
     },
     upsertSlide(slide) {
       this.slides.set(slide.id, slide);
@@ -5438,17 +5442,40 @@
         ui.toast("无法解析AI答案，请检查格式", 3e3);
         return "stop";
       }
-      // AI 思考期间老师可能已经结束本题，此时普通提交只会得到 50026。
+      // AI 思考期间老师可能已经结束本题——普通 /answer 会得到 50026，改走 /retry 强制补交。
             if (status.finished) {
-        status.answering = false;
-        console.warn("[雨课堂助手][WARN][AutoAnswer] AI 返回时老师已结束该题，未提交:", JSON.stringify(parsed));
-        diag("auto-skip", {
+        console.warn("[雨课堂助手][WARN][AutoAnswer] AI 返回时老师已结束该题，尝试强制补交:", JSON.stringify(parsed));
+        diag("auto-force-retry", {
           problemId: problem.problemId,
           reason: "finished-during-ai",
           answer: parsed
         });
-        notifyAutoAnswer("auto-answer-failed", problem, "老师已结束该题，AI 答案未提交，可在题目列表中强制补交。");
-        return "stop";
+        try {
+          await submitAnswer(problem, parsed, {
+            startTime: status.startTime,
+            endTime: status.endTime,
+            forceRetry: true,
+            lessonId: repo.currentLessonId,
+            autoGate: false
+          });
+          actions.onAnswerProblem(problem.problemId, parsed);
+          status.done = true;
+          status.answering = false;
+          notifyAutoAnswer("auto-answer-succeeded", problem, "老师已结束题目，已强制补交 AI 答案。");
+          ui.toast("强制补交成功（老师已结束但答案已提交）", 3e3);
+          return "done";
+        } catch (e) {
+          status.answering = false;
+          diag("auto-error", {
+            problemId: problem.problemId,
+            attempt: attempt,
+            reason: "force-retry-failed",
+            message: e?.message
+          });
+          notifyAutoAnswer("auto-answer-failed", problem, `强制补交失败：${e?.message || "未知错误"}`);
+          ui.toast(`强制补交失败: ${e.message}`, 4e3);
+          return "stop";
+        }
       }
       // 用户在 AI 思考期间自己交了答案，不再覆盖。
             if (problem.result) {
@@ -5607,7 +5634,8 @@
       ui.updateActiveProblems();
       return notified;
     },
-    // 老师提前结束题目：取消排队中的自动作答，并记住它，刷新后也不再触发。
+    // 老师提前结束题目：记住它，刷新后也不再触发。不取消排队中的自动作答——
+    // 让它继续运行并走强制补交（/retry）路径。
     onProblemFinished(problemId) {
       if (problemId === void 0 || problemId === null) return;
       rememberFinished(problemId);
@@ -5620,10 +5648,6 @@
       });
       if (!status) return;
       status.finished = true;
-      if (status.autoAnswerTime !== null && !status.done) {
-        status.autoAnswerTime = null;
-        console.log("[雨课堂助手][INFO][onProblemFinished] 老师已结束该题，取消排队中的自动作答:", problemId);
-      }
       ui.updateActiveProblems();
     },
     // 老师延时：{ prob, extend, limit }，extend=-1 表示改为不限时。
@@ -6229,45 +6253,78 @@
     } catch {}
     return;
   }
-  (function interceptFetch() {
-    if (window.__YKT_FETCH_PATCHED__) return;
-    window.__YKT_FETCH_PATCHED__ = true;
-    const rawFetch = window.fetch;
-    window.fetch = async function(...args) {
-      const [input, init] = args;
+  // src/net/fetch-interceptor.js
+    const PRESENTATION_URL_HINTS = [ "/lesson", "/presentation", "/slides", "/problem" ];
+  // Pure function: check whether a fetch response body is a presentation payload.
+    function parsePresentationFetchResponse(url, json) {
+    if (!json || !Array.isArray(json?.data?.slides)) return null;
+    if (!(json.code === 0 || json.success)) return null;
+    let id = null;
+    try {
+      id = new URL(url, "https://placeholder.invalid/").searchParams.get("presentation_id");
+    } catch {}
+    return {
+      id: id,
+      data: json.data
+    };
+  }
+  // Intercepts the page's real fetch() (on unsafeWindow) to capture presentation
+  // loads and answer submissions that the page issues via fetch rather than XHR.
+  // Must be called from startDesktopRuntime() after gm is available.
+    function installFetchInterceptor() {
+    const target = gm.uw || window;
+    if (target.__YKT_FETCH_PATCHED__) return;
+    target.__YKT_FETCH_PATCHED__ = true;
+    const rawFetch = target.fetch;
+    if (typeof rawFetch !== "function") return;
+    target.fetch = async function(...args) {
+      const [input] = args;
       const url = typeof input === "string" ? input : input?.url || "";
-      // === (1) 打印调试日志，可观察哪些接口走 fetch ===
-            if (url.includes("lesson") || url.includes("slide") || url.includes("problem")) console.log("[雨课堂助手][INFO][fetch-interceptor] 捕获请求:", url);
       const resp = await rawFetch.apply(this, args);
-      try {
-        // === (2) 只拦截 Rain Classroom 的 JSON 接口 ===
-        if (url.includes("/lesson") || url.includes("/presentation") || url.includes("/slides") || url.includes("/problem")) {
-          const cloned = resp.clone();
-          const text = await cloned.text();
-          // 这里不能直接 resp.json()，否则流会被消费；必须 clone()
-                    const json = JSON.parse(text);
-          // === (3) 关键：提取 slides 并灌入 repo.slides ===
-                    if (json && json.data && json.data.slides) {
-            const slides = json.data.slides;
-            let filled = 0;
-            for (const s of slides) {
-              const sid = String(s.id);
-              if (!repo.slides.has(sid)) {
-                repo.slides.set(sid, s);
-                filled++;
+      if (PRESENTATION_URL_HINTS.some(hint => url.includes(hint))) try {
+        const json = JSON.parse(await resp.clone().text());
+        const parsed = parsePresentationFetchResponse(url, json);
+        if (parsed) {
+          diag("fetch-presentation", {
+            id: parsed.id,
+            slides: parsed.data?.slides?.length
+          });
+          actions.onPresentationLoaded(parsed.id, parsed.data);
+        } else if (url.includes("/problem/answer") || url.includes("/problem/retry")) 
+        // Capture page's own manual answer submitted via fetch (XHR path is in xhr-interceptor)
+        try {
+          const reqBody = args[1]?.body;
+          if (reqBody && (json.code === 0 || json.success)) {
+            const body = JSON.parse(typeof reqBody === "string" ? reqBody : "{}");
+            if (url.includes("/problem/retry")) {
+              const first = Array.isArray(body?.problems) ? body.problems[0] : null;
+              if (first?.problemId) {
+                diag("page-answer", {
+                  problemId: first.problemId,
+                  result: first.result,
+                  route: "retry"
+                });
+                actions.onAnswerProblem(first.problemId, first.result);
+              }
+            } else {
+              const {problemId: problemId, result: result} = body;
+              if (problemId) {
+                diag("page-answer", {
+                  problemId: problemId,
+                  result: result,
+                  route: "answer"
+                });
+                actions.onAnswerProblem(problemId, result);
               }
             }
-            console.log(`雨课堂助手][INFO][fetch-interceptor] 已填充 slides ${filled}/${slides.length}`);
           }
-        }
+        } catch {}
       } catch (e) {
         console.warn("[雨课堂助手][ERR][fetch-interceptor] 解析响应失败:", e);
       }
       return resp;
- // 一定要返回原始 Response
-        };
-    console.log("[雨课堂助手][INFO][fetch-interceptor] fetch() 已被拦截");
-  })();
+    };
+  }
   var css = '/* ===== 通用 & 修复 ===== */\r\n#watermark_layer { display: none !important; visibility: hidden !important; }\r\n.hidden { display: none !important; }\r\n\r\n:root{\r\n  --ykt-z: 10000000;\r\n  --ykt-border: #ddd;\r\n  --ykt-border-strong: #ccc;\r\n  --ykt-bg: #fff;\r\n  --ykt-fg: #222;\r\n  --ykt-muted: #607190;\r\n  --ykt-accent: #1d63df;\r\n  --ykt-hover: #1e3050;\r\n  --ykt-shadow: 0 10px 30px rgba(0,0,0,.18);\r\n}\r\n\r\n/* ===== 工具栏 ===== */\r\n#ykt-helper-toolbar{\r\n  position: fixed; z-index: calc(var(--ykt-z) + 1);\r\n  left: 15px; bottom: 15px;\r\n  /* 移除固定宽度，让内容自适应 */\r\n  height: 36px; padding: 5px;\r\n  display: flex; gap: 6px; align-items: center;\r\n  background: var(--ykt-bg);\r\n  border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 4px;\r\n  box-shadow: 0 1px 4px 3px rgba(0,0,0,.1);\r\n}\r\n\r\n#ykt-helper-toolbar .btn{\r\n  display: inline-block; padding: 4px; cursor: pointer;\r\n  color: var(--ykt-muted); line-height: 1;\r\n}\r\n#ykt-helper-toolbar .btn:hover{ color: var(--ykt-hover); }\r\n#ykt-helper-toolbar .btn.active{ color: var(--ykt-accent); }\r\n\r\n/* ===== 面板通用样式 ===== */\r\n.ykt-panel{\r\n  position: fixed; right: 20px; bottom: 60px;\r\n  width: 560px; max-height: 72vh; overflow: auto;\r\n  background: var(--ykt-bg); color: var(--ykt-fg);\r\n  border: 1px solid var(--ykt-border-strong); border-radius: 8px;\r\n  box-shadow: var(--ykt-shadow);\r\n  display: none; \r\n  /* 提高z-index，确保后打开的面板在最上层 */\r\n  z-index: var(--ykt-z);\r\n}\r\n.ykt-panel.visible{ \r\n  display: block; \r\n  /* 动态提升z-index */\r\n  z-index: calc(var(--ykt-z) + 10);\r\n}\r\n\r\n.panel-header{\r\n  display: flex; align-items: center; justify-content: space-between;\r\n  gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--ykt-border);\r\n}\r\n.panel-header h3{ margin: 0; font-size: 16px; font-weight: 600; }\r\n.panel-body{ padding: 10px 12px; }\r\n.close-btn{ cursor: pointer; color: var(--ykt-muted); }\r\n.close-btn:hover{ color: var(--ykt-hover); }\r\n\r\n/* ===== 设置面板 (#ykt-settings-panel) ===== */\r\n#ykt-settings-panel .settings-content{ display: flex; flex-direction: column; gap: 14px; }\r\n#ykt-settings-panel .setting-group{ border: 1px dashed var(--ykt-border); border-radius: 6px; padding: 10px; }\r\n#ykt-settings-panel .setting-group h4{ margin: 0 0 8px 0; font-size: 14px; }\r\n#ykt-settings-panel .setting-item{ display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }\r\n#ykt-settings-panel label{ font-size: 13px; }\r\n#ykt-settings-panel input[type="text"],\r\n#ykt-settings-panel input[type="number"]{\r\n  height: 30px; border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 4px; padding: 0 8px; min-width: 220px;\r\n}\r\n#ykt-settings-panel small{ color: #666; }\r\n#ykt-settings-panel .setting-actions{ display: flex; gap: 8px; margin-top: 6px; }\r\n#ykt-settings-panel button{\r\n  height: 30px; padding: 0 12px; border-radius: 6px;\r\n  border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\r\n}\r\n#ykt-settings-panel button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\r\n\r\n/* 自定义复选框（与手写脚本一致的视觉语义） */\r\n#ykt-settings-panel .checkbox-label{ position: relative; padding-left: 26px; cursor: pointer; user-select: none; }\r\n#ykt-settings-panel .checkbox-label input{ position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }\r\n#ykt-settings-panel .checkbox-label .checkmark{\r\n  position: absolute; left: 0; top: 50%; transform: translateY(-50%);\r\n  height: 16px; width: 16px; border:1px solid var(--ykt-border-strong); border-radius: 3px; background: #fff;\r\n}\r\n#ykt-settings-panel .checkbox-label input:checked ~ .checkmark{\r\n  background: var(--ykt-accent); border-color: var(--ykt-accent);\r\n}\r\n#ykt-settings-panel .checkbox-label .checkmark:after{\r\n  content: ""; position: absolute; display: none;\r\n  left: 5px; top: 1px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);\r\n}\r\n#ykt-settings-panel .checkbox-label input:checked ~ .checkmark:after{ display: block; }\r\n\r\n/* ===== AI 解答面板 (#ykt-ai-answer-panel) ===== */\r\n#ykt-ai-answer-panel .ai-question{\r\n  white-space: pre-wrap; background: #fafafa; border: 1px solid var(--ykt-border);\r\n  padding: 8px; border-radius: 6px; margin-bottom: 8px; max-height: 160px; overflow: auto;\r\n}\r\n#ykt-ai-answer-panel .ai-loading{ color: var(--ykt-accent); margin-bottom: 6px; }\r\n#ykt-ai-answer-panel .ai-error{ color: #b00020; margin-bottom: 6px; }\r\n#ykt-ai-answer-panel .ai-answer{ white-space: pre-wrap; margin-top: 4px; }\r\n#ykt-ai-answer-panel .ai-actions{ margin-top: 10px; }\r\n#ykt-ai-answer-panel .ai-actions button{\r\n  height: 30px; padding: 0 12px; border-radius: 6px;\r\n  border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\r\n}\r\n#ykt-ai-answer-panel .ai-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\r\n\r\n/* ===== 课件浏览面板 (#ykt-presentation-panel) ===== */\r\n#ykt-presentation-panel{ width: 900px; }\r\n#ykt-presentation-panel .panel-controls{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }\r\n#ykt-presentation-panel .panel-body{\r\n  display: grid; grid-template-columns: 300px 1fr; gap: 10px;\r\n}\r\n#ykt-presentation-panel .panel-left,\r\n#ykt-presentation-panel .panel-right{\r\n  display: flex;\r\n  flex-direction: column;\r\n}\r\n#ykt-presentation-panel .presentation-list{\r\n  border: 1px solid var(--ykt-border);\r\n  border-radius: 8px;\r\n  background: #fff;\r\n  padding: 10px;\r\n  box-sizing: border-box;\r\n}\r\n#ykt-presentation-panel .presentation-title{\r\n  font-weight: 600; padding: 6px 0; border-bottom: 1px solid var(--ykt-border);\r\n}\r\n#ykt-presentation-panel .slide-thumb-list{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }\r\n#ykt-presentation-panel .slide-thumb{\r\n  position: relative; border: 1px solid var(--ykt-border); border-radius: 6px; background: #fafafa;\r\n  min-height: 60px; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 4px; text-align: center;\r\n}\r\n#ykt-presentation-panel .slide-thumb:hover{ border-color: var(--ykt-accent); background: #eef3ff; }\r\n#ykt-presentation-panel .slide-thumb img{ max-width: 100%; max-height: 120px; object-fit: contain; display: block; }\r\n.ykt-presentation-panel .slide-index {\r\n  position: absolute; top: 4px; left: 4px; z-index: 2;               \r\n  padding: 2px 6px; border-radius: 4px; font-size: 12px; line-height: 1;\r\n  background: rgba(0, 0, 0, 0.6); color: #fff; pointer-events: none;\r\n}\r\n#ykt-presentation-panel .slide-view{\r\n  position: relative; border: 1px solid var(--ykt-border); border-radius: 8px; min-height: 360px; background: #fff; overflow: hidden;\r\n}\r\n#ykt-presentation-panel .slide-cover{ display: flex; align-items: center; justify-content: center; min-height: 360px; }\r\n#ykt-presentation-panel .slide-cover img{ max-width: 100%; max-height: 100%; object-fit: contain; display: block; }\r\n#ykt-presentation-panel .ocr-panel{\r\n  margin-top: 12px;\r\n  border: 1px solid var(--ykt-border);\r\n  border-radius: 8px;\r\n  background: #fff;\r\n  padding: 12px;\r\n}\r\n#ykt-presentation-panel .ocr-head{\r\n  display: flex;\r\n  align-items: center;\r\n  justify-content: space-between;\r\n  gap: 8px;\r\n  margin-bottom: 8px;\r\n  font-weight: 600;\r\n}\r\n#ykt-presentation-panel .ocr-status{\r\n  font-size: 12px;\r\n  color: var(--ykt-muted);\r\n}\r\n#ykt-presentation-panel .ocr-status.is-loading{ color: #a16207; }\r\n#ykt-presentation-panel .ocr-status.is-error{ color: #b42318; }\r\n#ykt-presentation-panel .ocr-status.is-success{ color: #027a48; }\r\n#ykt-presentation-panel .ocr-tip{\r\n  margin-bottom: 8px;\r\n  font-size: 12px;\r\n  color: var(--ykt-muted);\r\n}\r\n#ykt-presentation-panel .ocr-translate-bar{\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 8px;\r\n  flex-wrap: wrap;\r\n  margin: 12px 0 8px;\r\n}\r\n#ykt-presentation-panel .ocr-translate-bar .ocr-status{\r\n  margin-left: auto;\r\n}\r\n#ykt-presentation-panel .ocr-target-input{\r\n  min-width: 220px;\r\n  height: 32px;\r\n  border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 6px;\r\n  padding: 0 10px;\r\n  box-sizing: border-box;\r\n}\r\n#ykt-presentation-panel .ocr-subhead{\r\n  margin-top: 4px;\r\n}\r\n#ykt-presentation-panel .ocr-result{\r\n  width: 100%;\r\n  min-height: 180px;\r\n  resize: vertical;\r\n  border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 6px;\r\n  padding: 10px;\r\n  line-height: 1.5;\r\n  font-size: 13px;\r\n  box-sizing: border-box;\r\n  background: #fafafa;\r\n}\r\n\r\n#ykt-presentation-panel .problem-box{\r\n  position: absolute; left: 12px; right: 12px; bottom: 12px;\r\n  background: rgba(255,255,255,.96); border: 1px solid var(--ykt-border);\r\n  border-radius: 8px; padding: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.12);\r\n}\r\n#ykt-presentation-panel .problem-head{ font-weight: 600; margin-bottom: 6px; padding-right: 28px; }\r\n#ykt-presentation-panel .problem-box-close{\r\n  position: absolute; top: 6px; right: 6px;\r\n  width: 22px; height: 22px; border-radius: 999px;\r\n  border: 1px solid var(--ykt-border-strong);\r\n  background: #fff; color: #555;\r\n  cursor: pointer; font-size: 16px; line-height: 18px;\r\n  padding: 0;\r\n}\r\n#ykt-presentation-panel .problem-box-close:hover{ color: #111; border-color: var(--ykt-accent); }\r\n#ykt-presentation-panel .problem-options{ display: grid; grid-template-columns: 1fr; gap: 4px; }\r\n#ykt-presentation-panel .problem-option{ padding: 6px 8px; border: 1px solid var(--ykt-border); border-radius: 6px; background: #fafafa; }\r\n\r\n/* ===== 题目列表面板 (#ykt-problem-list-panel) ===== */\r\n#ykt-problem-list{ display: flex; flex-direction: column; gap: 10px; }\r\n#ykt-problem-list .problem-row{\r\n  border: 1px solid var(--ykt-border); border-radius: 8px; padding: 8px; background: #fafafa;\r\n}\r\n#ykt-problem-list .problem-title{ font-weight: 600; margin-bottom: 4px; }\r\n#ykt-problem-list .problem-meta{ color: #666; font-size: 12px; margin-bottom: 6px; }\r\n#ykt-problem-list .problem-actions{ display: flex; gap: 8px; align-items: center; }\r\n#ykt-problem-list .problem-actions button{\r\n  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\r\n}\r\n#ykt-problem-list .problem-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\r\n#ykt-problem-list .problem-done{ color: #0a7a2f; font-weight: 600; }\r\n\r\n/* ===== 活动题目列表（右下角小卡片） ===== */\r\n#ykt-active-problems-panel.ykt-active-wrapper{\r\n  position: fixed; right: 20px; bottom: 60px; z-index: var(--ykt-z);\r\n}\r\n#ykt-active-problems{ display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow: auto; }\r\n#ykt-active-problems .active-problem-card{\r\n  position: relative;\r\n  width: 320px; background: #fff; border: 1px solid var(--ykt-border);\r\n  border-radius: 8px; box-shadow: var(--ykt-shadow); padding: 10px;\r\n}\r\n#ykt-active-problems .ap-close{\r\n  position: absolute; top: 6px; right: 6px;\r\n  width: 20px; height: 20px; border-radius: 999px;\r\n  border: 1px solid var(--ykt-border-strong);\r\n  background: #fff; color: #555;\r\n  cursor: pointer; padding: 0; font-size: 14px; line-height: 16px;\r\n}\r\n#ykt-active-problems .ap-close:hover{ color: #111; border-color: var(--ykt-accent); }\r\n#ykt-active-problems .ap-title{ font-weight: 600; margin-bottom: 4px; }\r\n#ykt-active-problems .ap-info{ color: #666; font-size: 12px; margin-bottom: 8px; }\r\n#ykt-active-problems .ap-actions{ display: flex; gap: 8px; }\r\n#ykt-active-problems .ap-actions button{\r\n  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\r\n}\r\n#ykt-active-problems .ap-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\r\n\r\n/* ===== 教程面板 (#ykt-tutorial-panel) ===== */\r\n#ykt-tutorial-panel .tutorial-content h4{ margin: 8px 0 6px; }\r\n#ykt-tutorial-panel .tutorial-content p,\r\n#ykt-tutorial-panel .tutorial-content li{ line-height: 1.5; }\r\n#ykt-tutorial-panel .tutorial-content a{ color: var(--ykt-accent); text-decoration: none; }\r\n#ykt-tutorial-panel .tutorial-content a:hover{ text-decoration: underline; }\r\n\r\n/* ===== 小屏适配 ===== */\r\n@media (max-width: 1200px){\r\n  #ykt-presentation-panel{ width: 760px; }\r\n  #ykt-presentation-panel .panel-body{ grid-template-columns: 260px 1fr; }\r\n}\r\n@media (max-width: 900px){\r\n  .ykt-panel{ right: 12px; left: 12px; width: auto; }\r\n  #ykt-presentation-panel{ width: auto; }\r\n  #ykt-presentation-panel .panel-body{ grid-template-columns: 1fr; }\r\n}\r\n\r\n/* ===== 自动作答成功弹窗 ===== */\r\n.auto-answer-popup{\r\n  position: fixed; inset: 0; z-index: calc(var(--ykt-z) + 2);\r\n  background: rgba(0,0,0,.2);\r\n  display: flex; align-items: flex-end; justify-content: flex-end;\r\n  opacity: 0; transition: opacity .18s ease;\r\n}\r\n.auto-answer-popup.visible{ opacity: 1; }\r\n\r\n.auto-answer-popup .popup-content{\r\n  width: min(560px, 96vw);\r\n  background: #fff; border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 10px; box-shadow: var(--ykt-shadow);\r\n  margin: 16px; overflow: hidden;\r\n}\r\n\r\n.auto-answer-popup .popup-header{\r\n  display: flex; align-items: center; justify-content: space-between;\r\n  gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--ykt-border);\r\n}\r\n.auto-answer-popup .popup-header h4{ margin: 0; font-size: 16px; }\r\n.auto-answer-popup .close-btn{ cursor: pointer; color: var(--ykt-muted); }\r\n.auto-answer-popup .close-btn:hover{ color: var(--ykt-hover); }\r\n\r\n.auto-answer-popup .popup-body{ padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }\r\n.auto-answer-popup .popup-row{ display: grid; grid-template-columns: 56px 1fr; gap: 8px; align-items: start; }\r\n.auto-answer-popup .label{ color: #666; font-size: 12px; line-height: 1.8; }\r\n.auto-answer-popup .content{ white-space: normal; word-break: break-word; }\r\n\r\n/* ===== 1.16.6: 课件浏览面板：固定右侧详细视图，左侧独立滚动 ===== */\r\n#ykt-presentation-panel {\r\n  --ykt-panel-max-h: 72vh;           /* 与 .ykt-panel 的最大高度保持一致 */\r\n}\r\n\r\n/* 两列布局：左列表 + 右详细视图 */\r\n#ykt-presentation-panel .panel-body{\r\n  display: grid;\r\n  grid-template-columns: 300px 1fr;  \r\n  gap: 12px;\r\n  overflow: hidden;                  \r\n  align-items: start;\r\n}\r\n\r\n/* 左侧：只让左列滚动，限制在面板可视高度内 */\r\n#ykt-presentation-panel .panel-left{\r\n  max-height: var(--ykt-panel-max-h);\r\n  overflow: auto;\r\n  min-width: 0;\r\n  align-self: stretch;\r\n}\r\n\r\n/* 右侧：粘性定位为“固定”，始终在面板可视区内 */\r\n#ykt-presentation-panel .panel-right{\r\n  position: sticky;\r\n  top: 0;                            \r\n  align-self: start;\r\n  gap: 12px;\r\n}\r\n\r\n/* 右侧详细视图自身也限制高度并允许内部滚动 */\r\n#ykt-presentation-panel .slide-view{\r\n  max-height: var(--ykt-panel-max-h);\r\n  overflow: auto;\r\n  border: 1px solid var(--ykt-border);\r\n  border-radius: 8px;\r\n  background: #fff;\r\n}\r\n\r\n/* 小屏自适配：堆叠布局时取消 sticky，避免遮挡 */\r\n@media (max-width: 900px){\r\n  #ykt-presentation-panel .panel-body{\r\n    grid-template-columns: 1fr;\r\n  }\r\n  #ykt-presentation-panel .panel-right{\r\n    position: static;\r\n  }\r\n}\r\n\r\n/* 在现有样式基础上添加 */\r\n\r\n.text-status {\r\n  font-size: 12px;\r\n  padding: 4px 8px;\r\n  border-radius: 4px;\r\n  margin: 4px 0;\r\n  display: inline-block;\r\n}\r\n\r\n.text-status.success {\r\n  background-color: #d4edda;\r\n  color: #155724;\r\n  border: 1px solid #c3e6cb;\r\n}\r\n\r\n.text-status.warning {\r\n  background-color: #fff3cd;\r\n  color: #856404;\r\n  border: 1px solid #ffeaa7;\r\n}\r\n\r\n.ykt-question-display {\r\n  background: #f8f9fa;\r\n  border: 1px solid #dee2e6;\r\n  border-radius: 4px;\r\n  padding: 8px;\r\n  margin: 4px 0;\r\n  max-height: 150px;\r\n  overflow-y: auto;\r\n  font-family: monospace;\r\n  font-size: 13px;\r\n  line-height: 1.4;\r\n}\r\n\r\n/* 在现有样式基础上添加 */\r\n\r\n.ykt-custom-prompt {\r\n  width: 100%;\r\n  min-height: 60px;\r\n  padding: 8px;\r\n  border: 1px solid #ddd;\r\n  border-radius: 4px;\r\n  font-family: inherit;\r\n  font-size: 13px;\r\n  line-height: 1.4;\r\n  resize: vertical;\r\n  background-color: #fff;\r\n  transition: border-color 0.3s ease;\r\n}\r\n\r\n.ykt-custom-prompt:focus {\r\n  outline: none;\r\n  border-color: #007bff;\r\n  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);\r\n}\r\n\r\n.ykt-custom-prompt::placeholder {\r\n  color: #999;\r\n  font-style: italic;\r\n}\r\n\r\n.ykt-custom-prompt:empty::before {\r\n  content: attr(placeholder);\r\n  color: #999;\r\n  font-style: italic;\r\n  pointer-events: none;\r\n}\r\n\r\n/* 确保输入框在暗色主题下也能正常显示 */\r\n.ykt-panel.dark .ykt-custom-prompt {\r\n  background-color: #2d3748;\r\n  border-color: #4a5568;\r\n  color: #e2e8f0;\r\n}\r\n\r\n.ykt-panel.dark .ykt-custom-prompt::placeholder {\r\n  color: #a0aec0;\r\n}\r\n\r\n.ykt-panel.dark .ykt-custom-prompt:focus {\r\n  border-color: #63b3ed;\r\n  box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.25);\r\n}\r\n\r\n/* ===== Markdown-like 样式 ===== */\r\n.ai-answer {\r\n  white-space: normal;\r\n  line-height: 1.6;\r\n  font-size: 14px;\r\n  color: inherit;\r\n}\r\n\r\n/* 段落和标题间距 */\r\n.ai-answer p { margin: 8px 0; }\r\n.ai-answer h1, .ai-answer h2, .ai-answer h3,\r\n.ai-answer h4, .ai-answer h5, .ai-answer h6 {\r\n  margin: 12px 0 6px;\r\n  line-height: 1.35;\r\n  font-weight: 600;\r\n}\r\n.ai-answer h1 { font-size: 20px; }\r\n.ai-answer h2 { font-size: 18px; }\r\n.ai-answer h3 { font-size: 16px; }\r\n.ai-answer h4 { font-size: 15px; }\r\n.ai-answer h5, .ai-answer h6 { font-size: 14px; }\r\n\r\n/* 链接 */\r\n.ai-answer a {\r\n  text-decoration: underline;\r\n  cursor: pointer;\r\n}\r\n\r\n/* 引用块 */\r\n.ai-answer blockquote {\r\n  margin: 8px 0;\r\n  padding: 6px 10px;\r\n  border-left: 3px solid rgba(0,0,0,0.2);\r\n  background: rgba(0,0,0,0.03);\r\n}\r\n\r\n/* 水平线 */\r\n.ai-answer hr {\r\n  border: 0;\r\n  border-top: 1px solid rgba(0,0,0,0.15);\r\n  margin: 10px 0;\r\n}\r\n\r\n/* 代码块与行内代码 */\r\n.ai-answer pre.ykt-md-code {\r\n  margin: 8px 0;\r\n  padding: 10px;\r\n  overflow: auto;\r\n  border: 1px solid rgba(0,0,0,0.15);\r\n  border-radius: 6px;\r\n  background: #f7f8fa;\r\n}\r\n.ai-answer pre.ykt-md-code code {\r\n  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;\r\n  font-size: 12px;\r\n}\r\n.ai-answer code.ykt-md-inline {\r\n  padding: 1px 4px;\r\n  border: 1px solid rgba(0,0,0,0.15);\r\n  border-radius: 4px;\r\n  background: #f7f8fa;\r\n  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;\r\n  font-size: 12px;\r\n}\r\n\r\n/* 列表 */\r\n.ai-answer ul, .ai-answer ol {\r\n  margin: 6px 0 6px 22px;   \r\n}\r\n.ai-answer ul { list-style: disc; }\r\n.ai-answer ol { list-style: decimal; }\r\n\r\n/* 表格 */\r\n.ai-answer table {\r\n  border-collapse: collapse;\r\n  margin: 8px 0;\r\n  width: 100%;\r\n  max-width: 100%;\r\n}\r\n.ai-answer th, .ai-answer td {\r\n  border: 1px solid rgba(0,0,0,0.15);\r\n  padding: 6px 8px;\r\n  text-align: left;\r\n}\r\n.ai-answer thead th {\r\n  background: rgba(0,0,0,0.05);\r\n  font-weight: 600;\r\n}\r\n\r\n/* 适配深色 */\r\n@media (prefers-color-scheme: dark) {\r\n  .ai-answer blockquote {\r\n    border-left-color: rgba(255,255,255,0.35);\r\n    background: rgba(255,255,255,0.06);\r\n  }\r\n  .ai-answer pre.ykt-md-code,\r\n  .ai-answer code.ykt-md-inline {\r\n    background: #111418;\r\n    border-color: rgba(255,255,255,0.2);\r\n  }\r\n  .ai-answer hr { border-top-color: rgba(255,255,255,0.2); }\r\n  .ai-answer th, .ai-answer td { border-color: rgba(255,255,255,0.2); }\r\n  .ai-answer thead th { background: rgba(255,255,255,0.08); }\r\n}\r\n\r\n#ykt-ai-answer.tex-enabled svg { vertical-align: middle; }\r\n#ykt-ai-answer.tex-enabled .MathJax { line-height: 1; }\r\n#ykt-ai-answer .mjx-svg { color: currentColor; }\r\n';
   // src/ui/styles.js
     function injectStyles() {
@@ -6509,6 +6566,7 @@
     injectStyles();
     ui._mountAll?.();
     installXHRInterceptor();
+    installFetchInterceptor();
     installToolbar();
     actions.startAutoAnswerLoop();
     actions.launchLessonHelper();

@@ -1,7 +1,7 @@
 ﻿// src/index.js
 import { installWSInterceptor } from './net/ws-interceptor.js';
 import { installXHRInterceptor } from './net/xhr-interceptor.js';
-import  './net/fetch-interceptor.js';
+import { installFetchInterceptor } from './net/fetch-interceptor.js';
 import { injectStyles } from './ui/styles.js';
 import { installToolbar } from './ui/toolbar.js';
 import { actions } from './state/actions.js';
@@ -92,6 +92,7 @@ function startDesktopRuntime() {
   injectStyles();
   ui._mountAll?.();
   installXHRInterceptor();
+  installFetchInterceptor();
   installToolbar();
   actions.startAutoAnswerLoop();
   actions.launchLessonHelper();

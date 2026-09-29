@@ -1,55 +1,69 @@
-import { repo } from '../state/repo.js';
+// src/net/fetch-interceptor.js
+import { gm } from '../core/env.js';
 import { actions } from '../state/actions.js';
+import { diag } from '../core/diagnostics.js';
 
-(function interceptFetch() {
-  if (window.__YKT_FETCH_PATCHED__) return;
-  window.__YKT_FETCH_PATCHED__ = true;
+const PRESENTATION_URL_HINTS = ['/lesson', '/presentation', '/slides', '/problem'];
 
-  const rawFetch = window.fetch;
-  window.fetch = async function (...args) {
-    const [input, init] = args;
+// Pure function: check whether a fetch response body is a presentation payload.
+export function parsePresentationFetchResponse(url, json) {
+  if (!json || !Array.isArray(json?.data?.slides)) return null;
+  if (!(json.code === 0 || json.success)) return null;
+  let id = null;
+  try { id = new URL(url, 'https://placeholder.invalid/').searchParams.get('presentation_id'); } catch {}
+  return { id, data: json.data };
+}
+
+// Intercepts the page's real fetch() (on unsafeWindow) to capture presentation
+// loads and answer submissions that the page issues via fetch rather than XHR.
+// Must be called from startDesktopRuntime() after gm is available.
+export function installFetchInterceptor() {
+  const target = gm.uw || window;
+  if (target.__YKT_FETCH_PATCHED__) return;
+  target.__YKT_FETCH_PATCHED__ = true;
+
+  const rawFetch = target.fetch;
+  if (typeof rawFetch !== 'function') return;
+
+  target.fetch = async function (...args) {
+    const [input] = args;
     const url = typeof input === 'string' ? input : input?.url || '';
-
-    // === (1) 打印调试日志，可观察哪些接口走 fetch ===
-    if (url.includes('lesson') || url.includes('slide') || url.includes('problem')) {
-      console.log('[雨课堂助手][INFO][fetch-interceptor] 捕获请求:', url);
-    }
-
     const resp = await rawFetch.apply(this, args);
 
-    try {
-      // === (2) 只拦截 Rain Classroom 的 JSON 接口 ===
-      if (
-        url.includes('/lesson') ||
-        url.includes('/presentation') ||
-        url.includes('/slides') ||
-        url.includes('/problem')
-      ) {
-        const cloned = resp.clone();
-        const text = await cloned.text();
-        // 这里不能直接 resp.json()，否则流会被消费；必须 clone()
-        const json = JSON.parse(text);
-
-        // === (3) 关键：提取 slides 并灌入 repo.slides ===
-        if (json && json.data && json.data.slides) {
-          const slides = json.data.slides;
-          let filled = 0;
-          for (const s of slides) {
-            const sid = String(s.id);
-            if (!repo.slides.has(sid)) {
-              repo.slides.set(sid, s);
-              filled++;
+    if (PRESENTATION_URL_HINTS.some(hint => url.includes(hint))) {
+      try {
+        const json = JSON.parse(await resp.clone().text());
+        const parsed = parsePresentationFetchResponse(url, json);
+        if (parsed) {
+          diag('fetch-presentation', { id: parsed.id, slides: parsed.data?.slides?.length });
+          actions.onPresentationLoaded(parsed.id, parsed.data);
+        } else if (url.includes('/problem/answer') || url.includes('/problem/retry')) {
+          // Capture page's own manual answer submitted via fetch (XHR path is in xhr-interceptor)
+          try {
+            const reqBody = args[1]?.body;
+            if (reqBody && (json.code === 0 || json.success)) {
+              const body = JSON.parse(typeof reqBody === 'string' ? reqBody : '{}');
+              if (url.includes('/problem/retry')) {
+                const first = Array.isArray(body?.problems) ? body.problems[0] : null;
+                if (first?.problemId) {
+                  diag('page-answer', { problemId: first.problemId, result: first.result, route: 'retry' });
+                  actions.onAnswerProblem(first.problemId, first.result);
+                }
+              } else {
+                const { problemId, result } = body;
+                if (problemId) {
+                  diag('page-answer', { problemId, result, route: 'answer' });
+                  actions.onAnswerProblem(problemId, result);
+                }
+              }
             }
-          }
-          console.log(`雨课堂助手][INFO][fetch-interceptor] 已填充 slides ${filled}/${slides.length}`);
+          } catch {}
         }
+      } catch (e) {
+        console.warn('[雨课堂助手][ERR][fetch-interceptor] 解析响应失败:', e);
       }
-    } catch (e) {
-      console.warn('[雨课堂助手][ERR][fetch-interceptor] 解析响应失败:', e);
     }
 
-    return resp; // 一定要返回原始 Response
+    return resp;
   };
-
-  console.log('[雨课堂助手][INFO][fetch-interceptor] fetch() 已被拦截');
-})();
+}

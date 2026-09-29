@@ -323,13 +323,31 @@ async function attemptAutoAnswer(problem, status, attempt) {
       return 'stop';
     }
 
-    // AI 思考期间老师可能已经结束本题，此时普通提交只会得到 50026。
+    // AI 思考期间老师可能已经结束本题——普通 /answer 会得到 50026，改走 /retry 强制补交。
     if (status.finished) {
-      status.answering = false;
-      console.warn('[雨课堂助手][WARN][AutoAnswer] AI 返回时老师已结束该题，未提交:', JSON.stringify(parsed));
-      diag('auto-skip', { problemId: problem.problemId, reason: 'finished-during-ai', answer: parsed });
-      notifyAutoAnswer('auto-answer-failed', problem, '老师已结束该题，AI 答案未提交，可在题目列表中强制补交。');
-      return 'stop';
+      console.warn('[雨课堂助手][WARN][AutoAnswer] AI 返回时老师已结束该题，尝试强制补交:', JSON.stringify(parsed));
+      diag('auto-force-retry', { problemId: problem.problemId, reason: 'finished-during-ai', answer: parsed });
+      try {
+        await submitAnswer(problem, parsed, {
+          startTime: status.startTime,
+          endTime: status.endTime,
+          forceRetry: true,
+          lessonId: repo.currentLessonId,
+          autoGate: false,
+        });
+        actions.onAnswerProblem(problem.problemId, parsed);
+        status.done = true;
+        status.answering = false;
+        notifyAutoAnswer('auto-answer-succeeded', problem, '老师已结束题目，已强制补交 AI 答案。');
+        ui.toast('强制补交成功（老师已结束但答案已提交）', 3000);
+        return 'done';
+      } catch (e) {
+        status.answering = false;
+        diag('auto-error', { problemId: problem.problemId, attempt, reason: 'force-retry-failed', message: e?.message });
+        notifyAutoAnswer('auto-answer-failed', problem, `强制补交失败：${e?.message || '未知错误'}`);
+        ui.toast(`强制补交失败: ${e.message}`, 4000);
+        return 'stop';
+      }
     }
     // 用户在 AI 思考期间自己交了答案，不再覆盖。
     if (problem.result) {
@@ -501,7 +519,8 @@ export const actions = {
     return notified;
   },
 
-  // 老师提前结束题目：取消排队中的自动作答，并记住它，刷新后也不再触发。
+  // 老师提前结束题目：记住它，刷新后也不再触发。不取消排队中的自动作答——
+  // 让它继续运行并走强制补交（/retry）路径。
   onProblemFinished(problemId) {
     if (problemId === undefined || problemId === null) return;
     rememberFinished(problemId);
@@ -509,10 +528,6 @@ export const actions = {
     diag('problem-finished', { problemId, hadStatus: !!status, answering: !!status?.answering, pending: status?.autoAnswerTime ?? null });
     if (!status) return;
     status.finished = true;
-    if (status.autoAnswerTime !== null && !status.done) {
-      status.autoAnswerTime = null;
-      console.log('[雨课堂助手][INFO][onProblemFinished] 老师已结束该题，取消排队中的自动作答:', problemId);
-    }
     ui.updateActiveProblems();
   },
 
