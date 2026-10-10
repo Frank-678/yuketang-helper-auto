@@ -18,6 +18,9 @@ _config.ai.kimiApiKey = storage.get('kimiApiKey', _config.ai.kimiApiKey);
 _config.TYPE_MAP = _config.TYPE_MAP || PROBLEM_TYPE_MAP;
 if (typeof _config.autoJoinEnabled === 'undefined') _config.autoJoinEnabled = false;
 if (typeof _config.autoAnswerOnAutoJoin === 'undefined') _config.autoAnswerOnAutoJoin = true;
+if (typeof _config.autoRecoverUnanswered === 'undefined') _config.autoRecoverUnanswered = false;
+if (typeof _config.autoRecoverExpired === 'undefined') _config.autoRecoverExpired = false;
+if (typeof _config.autoScanUnanswered === 'undefined') _config.autoScanUnanswered = false;
 if (typeof _config.iftex === 'undefined') _config.iftex = true;
 if (typeof _config.ai === 'undefined' || !_config.ai) _config.ai = {};
 if (typeof _config.ai.ocrApi === 'undefined') _config.ai.ocrApi = '';
@@ -32,6 +35,9 @@ if (typeof _config.customNotifyAudioSrc === 'undefined') _config.customNotifyAud
 if (typeof _config.customNotifyAudioName === 'undefined') _config.customNotifyAudioName = ''; 
 _config.autoJoinEnabled = !!_config.autoJoinEnabled;
 _config.autoAnswerOnAutoJoin = !!_config.autoAnswerOnAutoJoin;
+_config.autoRecoverUnanswered = !!_config.autoRecoverUnanswered;
+_config.autoRecoverExpired = !!_config.autoRecoverExpired;
+_config.autoScanUnanswered = !!_config.autoScanUnanswered;
 
 function saveConfig() { 
   try {
@@ -40,6 +46,9 @@ function saveConfig() {
         autoJoinEnabled: !!this.config.autoJoinEnabled,
         autoAnswerOnAutoJoin: !!this.config.autoAnswerOnAutoJoin,
       });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent?.(new CustomEvent('ykt:auto-answer-config-changed'));
+      }
     } catch (e) { console.warn('[ui.saveConfig] failed', e); }
 }
 
@@ -408,6 +417,12 @@ export const ui = {
       lines.push(...problem.options.map(({ key, value }) => `${key}. ${value}`));
     }
     return lines.join('\n');
+  },
+
+  confirm(message) {
+    return Promise.resolve(typeof window !== 'undefined' && typeof window.confirm === 'function'
+      ? window.confirm(message)
+      : false);
   },
 
   toast,

@@ -151,8 +151,9 @@ export async function submitAnswer(problem, result, submitOptions = {}) {
 
   const now = Date.now();
   const pastDeadline = typeof endTime === 'number' && now >= endTime;
+  const route = chooseAnswerRoute({ now, endTime, forceRetry });
 
-  if (pastDeadline || forceRetry) {
+  if (route === 'retry') {
 
     console.group('[雨课堂助手][DEBUG][answer] >>> 进入补交分支判断');
     console.log('problemId:', problem.problemId);

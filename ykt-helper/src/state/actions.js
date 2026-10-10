@@ -1,6 +1,7 @@
 // src/state/actions.js
 import { PROBLEM_TYPE_MAP } from '../core/types.js';
 import { randInt, gm } from '../core/env.js'
+import { storage } from '../core/storage.js';
 import { repo } from './repo.js';
 import { ui } from '../ui/ui-api.js';
 import { submitAnswer, retryAnswer } from '../tsm/answer.js';;
@@ -13,7 +14,13 @@ import { connectOrAttachLessonWS } from '../net/ws-interceptor.js';
 import { createEventReminder, createPublishReminder } from './publish-reminder.js';
 import { screenWakeLock } from '../core/screen-wake-lock.js';
 import { isReminderEnabled } from '../core/reminder-preferences.js';
+import { isCurrentPublishEvent } from '../core/publish-events.js';
+import { compareParsedAnswers, selectAnswerProfile } from '../core/answer-priority.js';
 import { getProblemEndTime } from './problem-timing.js';
+import { createProblemRecoveryStore, shouldRecoverProblem } from './auto-answer-recovery.js';
+import { createAutoAnswerRunner } from './auto-answer-runner.js';
+import { buildAnswerSubmitOptions } from './answer-editor.js';
+import { hasSubmittedAnswer } from '../core/answer-state.js';
 import { createDanmuFollowController } from '../core/danmu-follow.js';
 import { sendDanmuText } from '../core/danmu-sender.js';
 import { storage } from '../core/storage.js';
@@ -21,9 +28,15 @@ import { diag } from '../core/diagnostics.js';
 
 let _autoLoopStarted = false;
 let _autoJoinStarted = false;
+let _autoJoinGeneration = 0;
+let _autoJoinTimer = null;
 let _autoOnLessonClickStarted = false;
 let _autoOnLessonClickInProgress = false;
+let _navigationArbiter = null;
+let _autoJumpRetryTimer = null;
 let _routerHooked = false;
+let _problemRecoveryStore = null;
+let _problemRecoveryLessonId = null;
 const publishReminder = createPublishReminder({
   notify: event => ui.notifyPublish(event),
 });
@@ -33,11 +46,26 @@ const problemStartReminder = createEventReminder({
 });
 
 const danmuFollowControllers = new Map();
+const timelineProblemTracker = createTimelineProblemTracker();
+const LIVE_UNLOCK_RETRY_DELAY_MS = 250;
+const LIVE_UNLOCK_RETRY_LIMIT = 40;
 
-function createDanmuFollowControllerForLesson() {
+function createDanmuFollowControllerForLesson(lessonId) {
   return createDanmuFollowController({
     enabled: () => ui.config.autoFollowDanmu === true,
     getCurrentUserId: getCurrentUserIdSafe,
+    onRoundStart: event => ui.notifyClassroomEvent({
+      kind: 'danmu-round-start',
+      dedupeKey: `danmu-round-start:${lessonId}:${event.roundNumber}`,
+      title: '新一轮弹幕开始',
+      detail: `检测到第 ${event.roundNumber} 轮弹幕。首条内容：${event.text}`,
+    }),
+    onFollowTrigger: event => ui.notifyClassroomEvent({
+      kind: 'danmu-follow-trigger',
+      dedupeKey: `danmu-follow-trigger:${lessonId}:${event.roundNumber}:${event.text}`,
+      title: '弹幕达到自动跟发条件',
+      detail: `最近 ${event.batchSize} 条弹幕中，“${event.text}”出现 ${event.count} 次，脚本即将自动跟发。`,
+    }),
     send: text => sendDanmuText(text, {
       root: (gm.uw || window).document || document,
     }),
@@ -48,7 +76,7 @@ function getDanmuFollowController(lessonId) {
   const key = String(lessonId || '__current__');
   let controller = danmuFollowControllers.get(key);
   if (!controller) {
-    controller = createDanmuFollowControllerForLesson();
+    controller = createDanmuFollowControllerForLesson(key);
     danmuFollowControllers.set(key, controller);
   }
   return controller;
@@ -57,6 +85,15 @@ function getDanmuFollowController(lessonId) {
 function currentPageLessonId() {
   const match = String(window.location.pathname || '').match(/\/lesson\/fullscreen\/v3\/([^/]+)/);
   return match ? match[1] : null;
+}
+
+function shouldAutoAnswerForLesson(lessonId) {
+  if (ui?.config?.autoAnswer === true) return true;
+  const key = String(lessonId || '').trim();
+  if (!key) return false;
+  if (repo?.autoJoinedLessons?.has(key) && ui?.config?.autoAnswerOnAutoJoin === true) return true;
+  if (repo?.forceAutoAnswerLessons?.has(key)) return true;
+  return false;
 }
 
 const AUTO_ANSWER_EVENT_META = {
@@ -70,7 +107,7 @@ function firstValue(...values) {
   return values.find(value => value !== undefined && value !== null && String(value).trim() !== '');
 }
 
-function notifyProblemStart(data, problem, slide) {
+function notifyProblemStart(data, problem, slide, lessonId = null) {
   const payload = data && typeof data === 'object' ? data : {};
   const problemId = firstValue(
     problem?.problemId,
@@ -89,7 +126,7 @@ function notifyProblemStart(data, problem, slide) {
 
   return problemStartReminder.handle({
     kind: 'problem-start',
-    dedupeKey: `problem-start:${problemId || payload.sid || payload.dt || 'unknown'}`,
+    dedupeKey: `problem-start:${lessonId || 'unknown'}:${problemId || payload.sid || payload.dt || 'unknown'}`,
     title: '习题已发布',
     nativeTitle: '雨课堂习题提示',
     detail,
@@ -100,9 +137,10 @@ function notifyProblemStart(data, problem, slide) {
 
 function notifyAutoAnswer(kind, problem, detail) {
   const [title, defaultDetail] = AUTO_ANSWER_EVENT_META[kind] || ['自动作答提示', '自动作答状态发生变化。'];
+  const lessonId = repo.problemStatus.get(problem?.problemId)?.lessonId || repo.currentLessonId || 'unknown';
   return ui.notifyClassroomEvent({
     kind,
-    dedupeKey: `${kind}:${problem?.problemId || Date.now()}`,
+    dedupeKey: `${kind}:${lessonId}:${problem?.problemId || Date.now()}`,
     title,
     detail: detail || defaultDetail,
     problem,
@@ -143,7 +181,194 @@ function makeDefaultAnswer(problem) {
   }
 }
 
-export function hasActiveAIProfile(aiCfg) {
+function problemIdKey(problemId) {
+  return problemId === undefined || problemId === null ? null : String(problemId);
+}
+
+function getProblemById(problemId) {
+  const key = problemIdKey(problemId);
+  if (!key) return null;
+  return repo.problems.get(problemId)
+    || repo.problems.get(key)
+    || repo.problems.get(Number.isNaN(Number(key)) ? key : Number(key))
+    || null;
+}
+
+function getProblemStatus(problemId) {
+  const key = problemIdKey(problemId);
+  if (!key) return null;
+  return repo.problemStatus.get(problemId)
+    || repo.problemStatus.get(key)
+    || repo.problemStatus.get(Number.isNaN(Number(key)) ? key : Number(key))
+    || null;
+}
+
+function getProblemRecoveryStore(lessonIdOverride = null) {
+  const lessonId = lessonIdOverride || repo.currentLessonId;
+  if (!lessonId) return null;
+  const key = String(lessonId);
+  if (!_problemRecoveryStore || _problemRecoveryLessonId !== key) {
+    _problemRecoveryLessonId = key;
+    _problemRecoveryStore = createProblemRecoveryStore({ storage, lessonId: key });
+  }
+  return _problemRecoveryStore;
+}
+
+function statusPhase(status) {
+  if (status?.phase === 'queued' || status?.phase === 'answering' || status?.phase === 'failed') {
+    return status.phase;
+  }
+  if (status?.answering) return 'answering';
+  if (status?.done) return 'done';
+  return 'queued';
+}
+
+function persistProblemStatus(problemId, status, problem = getProblemById(problemId)) {
+  const store = getProblemRecoveryStore(status?.lessonId || repo.currentLessonId);
+  if (!store || !status) return;
+  if (status.done || problem?.result) {
+    store.remove(problemId);
+    return;
+  }
+
+  store.upsert({
+    lessonId: status.lessonId || repo.currentLessonId,
+    problemId: problemIdKey(problemId),
+    presentationId: status.presentationId,
+    slideId: status.slideId,
+    startTime: status.startTime,
+    endTime: status.endTime,
+    phase: statusPhase(status),
+    autoAnswerTime: status.autoAnswerTime,
+    autoAnswerQueued: status.autoAnswerQueued === true,
+    attempts: status.attempts,
+    lastError: status.lastError,
+    done: false,
+  });
+}
+
+function statusFromRecoveryRecord(record) {
+  const phase = record.phase === 'failed' ? 'failed' : 'queued';
+  return {
+    lessonId: record.lessonId || null,
+    presentationId: record.presentationId,
+    slideId: record.slideId,
+    startTime: record.startTime,
+    endTime: record.endTime,
+    done: false,
+    autoAnswerTime: null,
+    answering: false,
+    phase,
+    autoAnswerQueued: record.autoAnswerQueued !== false,
+    attempts: record.attempts || 0,
+    lastError: record.lastError || '',
+    recoveredFrom: record.phase,
+    recoveryForceRetry: false,
+  };
+}
+
+function createStatusForProblem(problem, { autoAnswerQueued = false } = {}) {
+  return {
+    presentationId: problem?.presentationId || null,
+    slideId: problem?.slideId || null,
+    lessonId: problem?.lessonId || null,
+    startTime: problem?.startTime ?? null,
+    endTime: problem?.endTime ?? null,
+    done: hasSubmittedAnswer(problem?.result),
+    autoAnswerTime: null,
+    answering: false,
+    phase: 'queued',
+    autoAnswerQueued,
+    attempts: 0,
+    lastError: '',
+    recoveryForceRetry: false,
+  };
+}
+
+function ensureProblemStatus(problem, { autoAnswerQueued = false } = {}) {
+  if (!problem?.problemId) return null;
+  const pid = problemIdKey(problem.problemId);
+  let status = getProblemStatus(pid);
+  if (!status) {
+    const recovered = getProblemRecoveryStore()?.get(pid);
+    status = recovered
+      ? statusFromRecoveryRecord(recovered)
+      : createStatusForProblem(problem, { autoAnswerQueued });
+    repo.problemStatus.set(pid, status);
+  }
+  return status;
+}
+
+function scheduleRecoveredStatus(status, decision, now = Date.now()) {
+  if (!status || !decision?.recover) return;
+  status.autoAnswerTime = now;
+  status.recoveryForceRetry = !!decision.forceRetry;
+  status.autoAnswerQueued = true;
+  status.phase = 'queued';
+}
+
+function restorePendingProblemStatuses() {
+  const store = getProblemRecoveryStore();
+  if (!store) return 0;
+
+  const now = Date.now();
+  let restored = 0;
+  for (const record of store.list()) {
+    const problem = getProblemById(record.problemId);
+    if (!problem) continue;
+    if (record.done || record.phase === 'done' || hasSubmittedAnswer(problem.result)) {
+      store.remove(record.problemId);
+      continue;
+    }
+
+    const status = statusFromRecoveryRecord(record);
+    const decision = shouldRecoverProblem(record, {
+      enabled: ui.config.autoRecoverUnanswered === true,
+      recoverExpired: ui.config.autoRecoverExpired === true,
+      now,
+    });
+    scheduleRecoveredStatus(status, decision, now);
+    repo.problemStatus.set(record.problemId, status);
+    if (decision.recover) persistProblemStatus(record.problemId, status, problem);
+    restored++;
+  }
+
+  if (ui.config.autoScanUnanswered === true) {
+    for (const encountered of repo.encounteredProblems || []) {
+      const problem = getProblemById(encountered.problemId);
+      const pid = problemIdKey(encountered.problemId);
+      if (!problem || !pid || hasSubmittedAnswer(problem.result) || getProblemStatus(pid)) continue;
+      const status = createStatusForProblem({
+        ...problem,
+        presentationId: encountered.presentationId,
+        slideId: encountered.slideId || encountered.slide?.id,
+      }, { autoAnswerQueued: true });
+      const decision = shouldRecoverProblem(status, {
+        enabled: true,
+        recoverExpired: ui.config.autoRecoverExpired === true,
+        now,
+      });
+      scheduleRecoveredStatus(status, decision, now);
+      repo.problemStatus.set(pid, status);
+      if (decision.recover) persistProblemStatus(pid, status, problem);
+      restored++;
+    }
+  }
+
+  if (restored) ui.updateActiveProblems();
+  return restored;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('ykt:auto-answer-config-changed', () => {
+    restorePendingProblemStatuses();
+    if (ui.config.autoJoinEnabled) actions.maybeStartAutoJoin();
+    else actions.stopAutoJoinLoop();
+  });
+}
+
+export function hasActiveAIProfile(aiCfg, selectedProfile = null) {
+  if (selectedProfile) return !!selectedProfile.apiKey;
   const cfg = aiCfg || {};
   const profiles = Array.isArray(cfg.profiles) ? cfg.profiles : [];
   if (profiles.length > 0) {
@@ -227,6 +452,8 @@ async function attemptAutoAnswer(problem, status, attempt) {
     diag('auto-skip', { problemId: problem.problemId, reason: status.finished ? 'finished' : 'expired' });
     return 'stop';
   }
+  return candidate;
+}
 
   status.answering = true;
   if (attempt === 1) notifyAutoAnswer('auto-answer-started', problem);
@@ -254,14 +481,15 @@ async function attemptAutoAnswer(problem, status, attempt) {
         autoGate: false,
       });
 
-      // 更新状态与UI
-      actions.onAnswerProblem(problem.problemId, parsed);
-      status.done = true;
-      status.answering = false;
-      notifyAutoAnswer('auto-answer-succeeded', problem, '这道题已使用本地默认答案提交。');
+  const verifyProfileId = String(ui.config.verifyAnswerProfileId || '').trim();
+  if (!verifyProfileId) {
+    return { answer: firstAnswer, aiAnswer: firstRawAnswer, state: 'not-configured' };
+  }
 
-      ui.toast('使用默认答案完成作答（未配置 API Key）', 3000);
-      showAutoAnswerPopup(problem, '（本地默认答案：无 API Key）');
+  const verifyProfile = selectAutoAnswerProfile('verify', now);
+  if (!verifyProfile?.apiKey || String(verifyProfile.id) !== verifyProfileId) {
+    return { answer: firstAnswer, aiAnswer: firstRawAnswer, state: 'unavailable' };
+  }
 
       console.log('[雨课堂助手][INFO][AutoAnswer] 默认答案提交流程结束');
       return 'done'; // 提前返回，避免继续走图像+AI流程
@@ -396,6 +624,47 @@ async function attemptAutoAnswer(problem, status, attempt) {
     ui.toast(`自动作答失败: ${e.message}`, 4000);
     return 'stop';
   }
+
+  return {
+    answer: verifiedAnswer,
+    aiAnswer: verifiedRawAnswer,
+    state: 'corrected',
+  };
+}
+
+const autoAnswerRunner = createAutoAnswerRunner({
+  typeMap: PROBLEM_TYPE_MAP,
+  hasActiveProfile: hasActiveAIProfile,
+  getAIConfig: () => ui.config.ai,
+  getAnswerProfile: ({ role, now }) => selectAutoAnswerProfile(role, now),
+  makeDefaultAnswer,
+  captureSlideImage,
+  captureProblemForVision,
+  formatProblemForVision,
+  queryAIVision,
+  parseAIAnswer,
+  submitAnswer,
+  verifyAnswer: verifyAutoAnswer,
+  onAnswered: (problem, result) => actions.onAnswerProblem(problem.problemId, result),
+  onStatusChange: (status, problem) => persistProblemStatus(problem?.problemId, status, problem),
+  notify: notifyAutoAnswer,
+  toast: (message, timeout) => ui.toast(message, timeout),
+  showPopup: showAutoAnswerPopup,
+});
+
+// 融合模式自动答题；force=true 用于刷新恢复和用户手动重试。
+async function handleAutoAnswerInternal(problem, options = {}) {
+  if (!problem?.problemId) return { ok: false, reason: 'missing-problem' };
+  const status = options.status || getProblemStatus(problem.problemId);
+  if (!status && !options.force) return { ok: false, reason: 'missing-status' };
+  const ensuredStatus = status || ensureProblemStatus(problem, { autoAnswerQueued: false });
+  return autoAnswerRunner.run(problem, ensuredStatus, {
+    force: options.force === true,
+    forceRetry: options.forceRetry === true,
+    allowResubmit: options.allowResubmit === true,
+    source: options.source || (options.force ? 'manual' : 'auto'),
+    lessonId: options.lessonId || ensuredStatus.lessonId || repo.currentLessonId,
+  });
 }
 
 export function startAutoAnswerLoop() {
@@ -406,10 +675,16 @@ export function startAutoAnswerLoop() {
     const now = Date.now();
     repo.problemStatus.forEach((status, pid) => {
       if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-        const problem = repo.problems.get(pid);
-        if (problem && !problem.result) {
+        const problem = getProblemById(pid);
+        if (problem && !hasSubmittedAnswer(problem.result)) {
           status.autoAnswerTime = null;
-          handleAutoAnswerInternal(problem);
+          persistProblemStatus(pid, status, problem);
+          handleAutoAnswerInternal(problem, {
+            status,
+            force: status.recoveryForceRetry === true,
+            forceRetry: status.recoveryForceRetry === true,
+            source: status.recoveryForceRetry === true ? 'recovery' : 'auto',
+          });
         }
       }
     });
@@ -502,17 +777,28 @@ export const actions = {
       return;
     }
 
-    const notified = notifyProblemStart(payload, problem, slide);
+    const notified = notifyProblemStart(payload, problem, slide, lessonId);
     if (notificationOnly) return notified;
 
-    if (ui.config.autoAnswer) {
-      const delay = ui.config.autoAnswerDelay + randInt(0, ui.config.autoAnswerRandomDelay);
+    if (expired && ui.config.autoForceRetry !== true) {
+      console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已过期，未开启自动强制补交');
+      ui.updateActiveProblems();
+      return notified;
+    }
+
+    if (autoAnswerEnabled && status.autoAnswerQueued && !status.answering && status.autoAnswerTime === null) {
+      status.phase = 'queued';
+      status.lastError = '';
+      const delay = expired
+        ? 0
+        : ui.config.autoAnswerDelay + randInt(0, ui.config.autoAnswerRandomDelay);
       status.autoAnswerTime = Date.now() + delay;
       diag('auto-scheduled', { problemId, source, delayMs: delay, endTime: status.endTime });
 
       console.log(`[雨课堂助手][INFO][onUnlockProblem] 将在 ${Math.floor(delay / 1000)} 秒后自动作答`);
       ui.toast(`将在 ${Math.floor(delay / 1000)} 秒后使用融合模式自动作答`, 3000);
       notifyAutoAnswer('auto-answer-scheduled', problem, `将在约 ${Math.floor(delay / 1000)} 秒后开始自动作答。`);
+      persistProblemStatus(pid, status, problem);
     }
 
     ui.updateActiveProblems();
@@ -549,12 +835,12 @@ export const actions = {
   onPublishEvent(event) {
     const notified = publishReminder.handle(event, ui.config);
     if (notified) {
-      console.log('[雨课堂助手][INFO][Publish] 已提醒发布事件:', event.category, event.dedupeKey);
+      console.log('[雨课堂助手][INFO][Publish] 已提醒发布事件:', contextualEvent.category, contextualEvent.dedupeKey);
     }
     return notified;
   },
 
-  onDanmu(data, options = {}) {
+  async onDanmu(data, options = {}) {
     const pageLessonId = currentPageLessonId();
     const messageLessonId = options.lessonId ? String(options.lessonId) : null;
     if (messageLessonId && pageLessonId && messageLessonId !== pageLessonId) {
@@ -565,51 +851,90 @@ export const actions = {
     }
 
     const lessonId = messageLessonId || pageLessonId || repo.currentLessonId || '__current__';
-    const result = getDanmuFollowController(lessonId).handle(data, options);
+    const result = await getDanmuFollowController(lessonId).handle(data, options);
     if (result.triggered) {
       if (result.sendResult?.sent) {
         console.log('[雨课堂助手][INFO][DanmuFollow] 已自动跟发:', result.text, {
           count: result.count,
           sentCount: result.sentCount,
         });
+        ui.toast(`弹幕已自动跟发：${result.text}`, 2500);
       } else {
+        const failureReason = result.sendResult?.reason || 'unknown';
         console.warn('[雨课堂助手][WARN][DanmuFollow] 达到跟发条件，但发送失败:', result.text, result.sendResult);
+        ui.toast(`弹幕自动跟发失败（${failureReason}）`, 4000);
       }
     }
     return result;
   },
 
-  onLessonFinished() {
+  onLessonFinished({ lessonId = null } = {}) {
+    const eventLessonId = lessonId ? String(lessonId) : repo.currentLessonId;
     return ui.notifyClassroomEvent({
       kind: 'lesson-finished',
-      dedupeKey: `lesson-finished:${repo.currentLessonId || Date.now()}`,
+      dedupeKey: `lesson-finished:${eventLessonId || Date.now()}`,
       title: '下课提示',
-      detail: '当前课程已结束。',
+      detail: eventLessonId && eventLessonId !== repo.currentLessonId
+        ? `课堂 ${eventLessonId} 已结束。`
+        : '当前课程已结束。',
     });
   },
 
   onAnswerProblem(problemId, result) {
-    const p = repo.problems.get(problemId);
+    const p = getProblemById(problemId);
     if (p) {
       p.result = result;
-      const i = repo.encounteredProblems.findIndex(e => e.problemId === problemId);
+      const i = repo.encounteredProblems.findIndex(e => String(e.problemId) === String(problemId));
       if (i !== -1) repo.encounteredProblems[i].result = result;
+      const status = getProblemStatus(problemId);
+      if (status) {
+        status.done = true;
+        status.answering = false;
+        status.phase = 'done';
+        status.autoAnswerTime = null;
+      }
+      getProblemRecoveryStore(status?.lessonId || repo.currentLessonId)?.remove(problemId);
       ui.updateProblemList();
     }
   },
 
-  async handleAutoAnswer(problem) {
-    return handleAutoAnswerInternal(problem);
+  async handleAutoAnswer(problem, options = {}) {
+    const resolved = getProblemById(problem?.problemId) || problem;
+    if (!resolved?.problemId) return { ok: false, reason: 'missing-problem' };
+    const status = options.status || ensureProblemStatus(resolved, {
+      autoAnswerQueued: options.force !== true,
+    });
+    return handleAutoAnswerInternal(resolved, { ...options, status });
+  },
+
+  async forceAIAnswer(problemId, options = {}) {
+    const problem = getProblemById(problemId);
+    if (!problem) return { ok: false, reason: 'missing-problem' };
+    const status = ensureProblemStatus(problem, { autoAnswerQueued: false });
+    if (!status) return { ok: false, reason: 'missing-status' };
+    return handleAutoAnswerInternal(problem, {
+      ...options,
+      status,
+      force: true,
+      allowResubmit: true,
+      source: 'manual',
+    });
   },
 
   tickAutoAnswer() {
     const now = Date.now();
     for (const [pid, status] of repo.problemStatus) {
       if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-        const p = repo.problems.get(pid);
+        const p = getProblemById(pid);
         if (p) {
           status.autoAnswerTime = null;
-          this.handleAutoAnswer(p);
+          persistProblemStatus(pid, status, p);
+          this.handleAutoAnswer(p, {
+            status,
+            force: status.recoveryForceRetry === true,
+            forceRetry: status.recoveryForceRetry === true,
+            source: status.recoveryForceRetry === true ? 'recovery' : 'auto',
+          });
         }
       }
     }
@@ -622,6 +947,24 @@ export const actions = {
       autoGate: false  // 手动提交
     });
     this.onAnswerProblem(problem.problemId, result);
+  },
+
+  async submitParsedAnswer(problem, result, { forceRetry = false } = {}) {
+    const resolved = getProblemById(problem?.problemId) || problem;
+    if (!resolved?.problemId) return { ok: false, reason: 'missing-problem' };
+    const status = ensureProblemStatus(resolved, { autoAnswerQueued: false });
+    if (!status) return { ok: false, reason: 'missing-status' };
+    persistProblemStatus(resolved.problemId, status, resolved);
+    const submission = await submitAnswer(
+      resolved,
+      result,
+      buildAnswerSubmitOptions(status, {
+        lessonId: repo.currentLessonId,
+        forceRetry,
+      }),
+    );
+    this.onAnswerProblem(resolved.problemId, result);
+    return { ok: true, ...submission };
   },
 
   parseManual(problemType, content) {
@@ -662,27 +1005,18 @@ export const actions = {
       });
     }
     repo.loadStoredPresentations();
+    restorePendingProblemStatuses();
     this.maybeStartAutoJoin();           
     this.installRouterRearm();            
     void screenWakeLock.setEnabled(ui.config.keepScreenAwake);
   },
   
-    startAutoAnswerLoop() {
-    if (_autoLoopStarted) return;
-    _autoLoopStarted = true;
+  startAutoAnswerLoop() {
+    return startAutoAnswerLoop();
+  },
 
-    setInterval(() => {
-      const now = Date.now();
-      repo.problemStatus.forEach((status, pid) => {
-        if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-          const problem = repo.problems.get(pid);
-          if (problem && !problem.result) {
-            status.autoAnswerTime = null;
-            handleAutoAnswerInternal(problem);
-          }
-        }
-      });
-    }, 500);
+  restorePendingProblemStatuses() {
+    return restorePendingProblemStatuses();
   },
 
   // 自动进入课堂
@@ -690,16 +1024,26 @@ export const actions = {
     if (_autoJoinStarted) return;
     _autoJoinStarted = true;
     repo.autoJoinRunning = true;
+    const generation = ++_autoJoinGeneration;
 
     const loop = async () => {
-      if (!repo.autoJoinRunning) return;
+      if (!repo.autoJoinRunning || generation !== _autoJoinGeneration) return;
       try {
         const list = await getOnLesson();
-        // 期望结构：每项至少含 { lessonId, status }，其中 status==1 表示正在上课
-        for (const it of list) {
-          const lessonId = it.lessonId || it.lesson_id || it.id;
-          const status = it.status;
-          if (!lessonId || status !== 1) continue;
+        if (!repo.autoJoinRunning || generation !== _autoJoinGeneration) return;
+        const snapshot = syncActiveLessons([...repo.activeLessons.values()], list);
+        repo.activeLessons.clear();
+        for (const item of snapshot.active) repo.activeLessons.set(item.lessonId, item);
+
+        for (const staleLessonId of snapshot.removed) {
+          const staleSocket = repo.lessonSockets.get(staleLessonId);
+          repo.markLessonDisconnected(staleLessonId, 'inactive');
+          try { staleSocket?.close?.(); } catch {}
+        }
+
+        // 每个 status===1 的课堂都独立建立或复用连接。
+        for (const it of snapshot.active) {
+          const lessonId = getLessonId(it);
           if (repo.isLessonConnected(lessonId)) continue; // 已有连接
 
           console.log('[雨课堂助手][INFO][AutoJoin] 检测到正在上课的课堂，准备进入:', lessonId);
@@ -710,11 +1054,8 @@ export const actions = {
               continue;
             }
             connectOrAttachLessonWS({ lessonId, auth: token });
-            // 标记该课堂为“自动进入”
+            // 标记该课堂为“自动进入”；是否自动答题由统一策略动态读取配置。
             repo.markLessonAutoJoined(lessonId, true);
-            if (ui.config.autoAnswerOnAutoJoin) {
-              repo.forceAutoAnswerLessons.add(lessonId);
-            }
           } catch (e) {
             console.error('[雨课堂助手][ERR][AutoJoin] 进入课堂失败:', lessonId, e);
           }
@@ -722,14 +1063,32 @@ export const actions = {
       } catch (e) {
           console.error('[雨课堂助手][ERR][AutoJoin] 拉取正在上课失败:', e);
       } finally {
-        setTimeout(loop, 5000);
+        if (repo.autoJoinRunning && generation === _autoJoinGeneration) {
+          _autoJoinTimer = setTimeout(loop, 5000);
+        }
       }
     };
-    loop();
+    void loop();
   },
 
   stopAutoJoinLoop() {
     repo.autoJoinRunning = false;
+    _autoJoinStarted = false;
+    _autoJoinGeneration += 1;
+    if (_autoJoinTimer !== null) {
+      clearTimeout(_autoJoinTimer);
+      _autoJoinTimer = null;
+    }
+    _navigationArbiter?.cancel();
+    if (_autoJumpRetryTimer !== null) {
+      clearTimeout(_autoJumpRetryTimer);
+      _autoJumpRetryTimer = null;
+    }
+    for (const lessonId of [...repo.autoJoinedLessons]) {
+      const socket = repo.lessonSockets.get(String(lessonId));
+      try { socket?.close?.(); } catch {}
+      repo.markLessonDisconnected(lessonId, 'auto-join-stopped');
+    }
   },
 
   /** 统一判断并启动自动加入链路（可多次调用，内部防重） */
@@ -744,7 +1103,10 @@ export const actions = {
     if (_routerHooked) return;
     _routerHooked = true;
     const uw = (gm && gm.uw) ? gm.uw : (window.unsafeWindow || window);
-    const rearm = () => {
+    const rearm = ({ userIntent = true } = {}) => {
+      // 任何站内路由变化都视为用户已经做出选择；自动跳转只拥有当前页面的
+      // 一次机会，不能在用户切换课件后再次抢回导航权。
+      if (userIntent) _navigationArbiter?.observeUserIntent();
       // 重置一次“onlesson 点击守卫”的进行中标记，避免被卡住
       _autoOnLessonClickInProgress = false;
       // 每次路由变更都尝试启动（内部有防重，所以安全）
@@ -762,126 +1124,94 @@ export const actions = {
     wrap(uw.history, 'pushState');
     wrap(uw.history, 'replaceState');
     uw.addEventListener('popstate', rearm);
-    uw.addEventListener('visibilitychange', () => { if (!document.hidden) rearm(); });
+    uw.addEventListener('visibilitychange', () => {
+      if (!document.hidden) rearm({ userIntent: false });
+    });
   },
 
-  // ===== 自动点击“正在上课”条：无需预先拿 lesson_id，复用官方路由逻辑 =====
+  // ===== 自动跳转“正在上课”课堂：先给用户十秒选择时间 =====
   startAutoClickOnOnLessonBar() {
     if (_autoOnLessonClickStarted) return;
-    _autoOnLessonClickStarted = true;
 
     // 仅在非课堂页（首页/课表页等）生效
     if (/\/lesson\//.test(location.pathname)) return;
+    _autoOnLessonClickStarted = true;
 
     const uw = (gm && gm.uw) ? gm.uw : (window.unsafeWindow || window);
 
-    async function tryApiJumpFirst() {
-      if (_autoOnLessonClickInProgress) return false;
-      _autoOnLessonClickInProgress = true;
-      try {
-        const list = await getOnLesson();              // ← 强化后的版本
-        const arr = Array.isArray(list) ? list : [];
-        // A) 严格：status===1
-        let on = arr.find(x => (x?.status === 1) && (x.lessonId || x.lesson_id || x.id));
-        // B) 回退：没有严格匹配，但有 lessonId 就用第一条
-        if (!on) {
-          const withId = arr.find(x => (x && (x.lessonId || x.lesson_id || x.id)));
-          if (withId) {
-            console.warn('[雨课堂助手][WARN][AutoJoin][API] 没有 status===1，但存在 lessonId，使用回退项：', {
-              status: withId.status,
-              keys: Object.keys(withId || {}),
-              sample: withId
-            });
-            on = withId;
-          }
-        }
-        if (!on) {
-          // 详细日志：环境、主机、列表长度与前 3 项
-          try {
-            console.warn('[雨课堂助手][ERR][AutoJoin][API] EMPTY on-lesson list', {
-              host: location.hostname,
-              path: location.pathname,
-              length: Array.isArray(list) ? list.length : -1,
-              sample: Array.isArray(list) ? list.slice(0, 3) : list
-            });
-          } catch {}
-          _autoOnLessonClickInProgress = false; 
-          return false;
-        }
-        const lessonId = on.lessonId || on.lesson_id || on.id;
-        let target = null;
-        
-        if (lessonId) target = `/lesson/fullscreen/v3/${lessonId}`;
-        else     target = `/v2/web/lesson/${lessonId}`; 
-        if (location.pathname === target) { _autoOnLessonClickInProgress = false; return true; }
+    _navigationArbiter = createNavigationArbiter({
+      waitMs: 10_000,
+      navigate: target => {
+        console.log('[雨课堂助手][INFO][AutoJoin] 十秒内无用户操作，自动进入最新课堂:', target);
+        (uw.location || location).assign(target);
+      },
+    });
 
-        // 为了少日志，先 replace 再 assign（站内有时也会 push /index）
-        history.replaceState(null, '', location.href);
-        location.assign(target);
-        return true;
-      } catch (e) {
-        console.warn('[雨课堂助手][ERR][AutoJoin][API] 跳转失败：', e, {
-          host: location.hostname,
-          path: location.pathname
-        });
-        _autoOnLessonClickInProgress = false;
+    const cancelAutomaticNavigation = (event) => {
+      // 脚本内部的合成事件不能夺走用户的导航选择权；真实输入才算用户操作。
+      if (event?.isTrusted === false) return;
+      if (_navigationArbiter.observeUserIntent()) {
+        console.log('[雨课堂助手][INFO][AutoJoin] 检测到用户操作，取消自动跳转');
+      }
+      if (_autoJumpRetryTimer !== null) {
+        clearTimeout(_autoJumpRetryTimer);
+        _autoJumpRetryTimer = null;
+      }
+    };
+
+    const doc = uw.document || document;
+    for (const eventName of ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'wheel']) {
+      doc.addEventListener(eventName, cancelAutomaticNavigation, {
+        capture: true,
+        passive: eventName === 'wheel' || eventName === 'touchstart',
+      });
+    }
+
+    async function offerLatestClassroom() {
+      if (_autoOnLessonClickInProgress || _navigationArbiter.userHasIntent || _navigationArbiter.hasPending) {
         return false;
       }
-    }
-
-    function attachGuardAndTrigger(root = uw.document) {
-      const bar = root.querySelector('.onlesson .jump_lesson__bar');
-      if (!bar || bar.__ykt_guard_bound__) return false;
-      if (_autoOnLessonClickInProgress) return false;
-
-      bar.__ykt_guard_bound__ = true;
-      console.log('[雨课堂助手][INFO][AutoJoin][DOM] 发现 onlesson 条，接管点击（捕获阶段）');
-
-      const handler = async (ev) => {
-        ev.preventDefault();
-        ev.stopImmediatePropagation?.();
-        ev.stopPropagation();
-        if (_autoOnLessonClickInProgress) return;
-
-        // 延时阶梯：考虑 WS 刚推完 banner 但接口还没更新
-        const delays = [0, 250, 600, 1200, 2000, 3000];
-        for (const d of delays) {
-          if (d) await new Promise(r => setTimeout(r, d));
-          if (await tryApiJumpFirst()) return;
-        }
-        console.warn('[雨课堂助手][WARN][AutoJoin][DOM] on-lesson 接口仍为空，放弃本次点击');
-        try {
-          console.group('%c[AutoJoin][DOM] on-lesson 仍为空，放弃本次点击', 'color:#f60');
-          console.log('env:', { host: location.hostname, path: location.pathname, href: location.href });
-          console.log('retryDelays(ms):', delays);
-          console.log('hint:', '可能是域/路径不匹配、会话未带上、或 WS/接口不同步导致。请展开上方 [getOnLesson] 折叠日志查看每个候选 URL 的状态与响应片段。');
-          console.groupEnd();
-        } catch {}
-      };
-
-      bar.addEventListener('click', handler, { capture: true });
-      // 触发一次我们自己的 click（优先进入捕获处理器）
+      _autoOnLessonClickInProgress = true;
       try {
-        const W = bar.ownerDocument?.defaultView || uw;
-        const ClickEvt = W.MouseEvent || uw.MouseEvent;
-        bar.dispatchEvent(new ClickEvt('click', { bubbles: true, cancelable: true, view: W }));
-      } catch (e) {
-        // 兜底：部分环境对 MouseEvent 构造器有限制
-        try { bar.click(); } catch (_) {}
+        const list = await getOnLesson();
+        const latest = pickLatestActiveLesson(list);
+        if (!latest) {
+          console.log('[雨课堂助手][INFO][AutoJoin] 当前没有 status=1 的活跃课堂，暂不跳转');
+          return false;
+        }
+
+        const lessonId = getLessonId(latest);
+        const target = `/lesson/fullscreen/v3/${lessonId}`;
+        const currentPath = (uw.location || location).pathname;
+        if (currentPath === target) return true;
+
+        const offered = _navigationArbiter.offer(target);
+        if (offered) {
+          console.log('[雨课堂助手][INFO][AutoJoin] 已找到最新活跃课堂，等待十秒确认:', lessonId);
+        }
+        return offered;
+      } catch (error) {
+        console.warn('[雨课堂助手][WARN][AutoJoin][API] 获取最新活跃课堂失败:', error);
+        return false;
+      } finally {
+        _autoOnLessonClickInProgress = false;
       }
-      return true;
     }
 
-    // A) 首选：直接 API 跳转（若此时就能拿到 on-lesson，就不必等 DOM）
-    tryApiJumpFirst().then((ok) => {
-      if (ok) return;
-      // B) DOM 渲染后接管点击
-      if (attachGuardAndTrigger()) return;
-      const mo = new uw.MutationObserver(() => {
-        if (attachGuardAndTrigger()) { mo.disconnect(); return; }
-      });
-      mo.observe(uw.document.documentElement, { childList: true, subtree: true });
-      // setTimeout(() => mo.disconnect(), 10000);
+    const retryOffer = () => {
+      if (_navigationArbiter.userHasIntent || _navigationArbiter.hasPending || /\/lesson\//.test((uw.location || location).pathname)) {
+        _autoJumpRetryTimer = null;
+        return;
+      }
+      _autoJumpRetryTimer = setTimeout(async () => {
+        _autoJumpRetryTimer = null;
+        const offered = await offerLatestClassroom();
+        if (!offered) retryOffer();
+      }, 5000);
+    };
+
+    void offerLatestClassroom().then(offered => {
+      if (!offered) retryOffer();
     });
   },
 };

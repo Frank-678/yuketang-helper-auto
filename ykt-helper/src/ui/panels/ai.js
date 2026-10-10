@@ -4,7 +4,8 @@ import { repo } from '../../state/repo.js';
 import { queryAI, queryAIVision} from '../../ai/openai.js';
 import { captureSlideImage } from '../../capture/screenshoot.js';
 import { parseAIAnswer } from '../../tsm/ai-format.js';
-import { hasActiveAIProfile} from '../../state/actions.js'
+import { actions, hasActiveAIProfile} from '../../state/actions.js'
+import { parseEditableAnswer, formatEditableAnswer } from '../../state/answer-editor.js';
 import { getCurrentMainPageSlideId, waitForVueReady, watchMainPageChange } from '../../core/vuex-helper.js';
 
 const L = (...a) => console.log('[雨课堂助手][DBG][ai]', ...a);
@@ -15,6 +16,7 @@ let root;
 let preferredSlideFromPresentation = null; // 启用来自presentation的页面
 let preferredSlidesFromPresentation = []; // 手动多页（仅用于“提问当前PPT”的多选）
 let manualMultiSlidesArmed = false; // 只有手动触发时才允许多图
+let lastAnswerContext = null;
 
 function renderSelectedPPTPreview() {
   const box = document.getElementById('ykt-ai-selected');
@@ -258,6 +260,11 @@ export function mountAIPanel() {
 
   $('#ykt-ai-close')?.addEventListener('click', () => showAIPanel(false));
   $('#ykt-ai-ask')?.addEventListener('click', askAIFusionMode);
+  $('#ykt-ai-force-answer')?.addEventListener('click', forceAIAnswerForCurrent);
+  $('#ykt-ai-submit')?.addEventListener('click', submitEditedAnswer);
+  $('#ykt-ai-reset-edit')?.addEventListener('click', () => {
+    if (lastAnswerContext?.parsed !== undefined) setEditableAnswer(lastAnswerContext.parsed);
+  });
 
   waitForVueReady().then(() => {
     watchMainPageChange((slideId, slideInfo) => {
@@ -376,6 +383,111 @@ function getCustomPrompt() {
   const el = $('#ykt-ai-custom-prompt'); return el ? (el.value.trim() || '') : '';
 }
 
+function currentProblemStatus(problem) {
+  if (!problem?.problemId) return null;
+  const key = String(problem.problemId);
+  return repo.problemStatus.get(problem.problemId)
+    || repo.problemStatus.get(key)
+    || (Number.isNaN(Number(key)) ? null : repo.problemStatus.get(Number(key)))
+    || null;
+}
+
+function setEditableAnswer(value) {
+  const section = $('#ykt-ai-edit-section');
+  const textarea = $('#ykt-ai-answer-edit');
+  const validate = $('#ykt-ai-validate');
+  if (!section || !textarea) return;
+  section.style.display = '';
+  textarea.value = formatEditableAnswer(value);
+  if (validate) {
+    validate.textContent = '答案已解析，可提交前手动修改。';
+    validate.style.color = '#2e7d32';
+  }
+}
+
+function setEditableError(message) {
+  const validate = $('#ykt-ai-validate');
+  if (!validate) return;
+  validate.textContent = message;
+  validate.style.color = '#c62828';
+}
+
+function hideEditableAnswer() {
+  const section = $('#ykt-ai-edit-section');
+  if (section) section.style.display = 'none';
+}
+
+async function submitEditedAnswer() {
+  const problem = lastAnswerContext?.problem;
+  const textarea = $('#ykt-ai-answer-edit');
+  if (!problem || !textarea) {
+    setAIError('当前页面没有可提交的题目；请先选择题目页并进行 AI 分析。');
+    return;
+  }
+
+  const parsed = parseEditableAnswer(problem.problemType, textarea.value);
+  if (parsed === null) {
+    setEditableError('答案格式无法识别或为空，请填写 JSON 或题型对应的简写。');
+    return;
+  }
+
+  const status = currentProblemStatus(problem);
+  const endTime = Number(status?.endTime ?? problem.endTime);
+  const expired = Number.isFinite(endTime) && Date.now() >= endTime;
+  if (expired && !window.confirm('这道题已过截止时间，将使用强制补交接口。继续吗？')) return;
+
+  const button = $('#ykt-ai-submit');
+  if (button) button.disabled = true;
+  try {
+    const result = await actions.submitParsedAnswer(problem, parsed, { forceRetry: expired });
+    if (!result?.ok) throw new Error(result?.reason || '提交失败');
+    lastAnswerContext.parsed = parsed;
+    setAIError('');
+    setEditableAnswer(parsed);
+    ui.toast(expired ? '编辑答案已补交' : '编辑答案已提交', 3000);
+  } catch (error) {
+    setAIError(`编辑答案提交失败：${error?.message || error}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function forceAIAnswerForCurrent() {
+  let problem = lastAnswerContext?.problem;
+  if (!problem) {
+    let sid = preferredSlideFromPresentation?.slideId || repo.currentSlideId;
+    // 主界面可能没有更新 repo.currentSlideId；此时从 Vuex 读取实际显示页。
+    if (!sid) {
+      try { sid = getCurrentMainPageSlideId(); } catch (_) {}
+    }
+    const look = getSlideByAny(sid);
+    problem = look.slide?.problem || null;
+  }
+  if (!problem?.problemId) {
+    setAIError('当前页面没有识别到题目，无法执行强制 AI 作答。');
+    return;
+  }
+  const status = currentProblemStatus(problem);
+  const endTime = Number(status?.endTime ?? problem.endTime);
+  const expired = Number.isFinite(endTime) && Date.now() >= endTime;
+  if (expired && !window.confirm('这道题已过截止时间，AI 将使用强制补交接口。继续吗？')) return;
+
+  const button = $('#ykt-ai-force-answer');
+  if (button) button.disabled = true;
+  try {
+    const result = await actions.forceAIAnswer(problem.problemId, { forceRetry: expired });
+    if (!result?.ok) throw new Error(result?.reason || result?.error?.message || '作答失败');
+    lastAnswerContext = lastAnswerContext || { problem };
+    lastAnswerContext.parsed = result.answer;
+    setEditableAnswer(result.answer);
+    ui.toast(expired ? 'AI 作答完成并已补交' : 'AI 作答完成', 3000);
+  } catch (error) {
+    setAIError(`强制 AI 作答失败：${error?.message || error}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function _logMapLookup(where, id) {
   const sid = id == null ? null : String(id);
   const hasS = sid ? repo.slides.has(sid) : false;
@@ -482,6 +594,8 @@ function renderQuestion() {
 
 export async function askAIFusionMode() {
   setAIError(''); setAILoading(true); setAIAnswer('');
+  lastAnswerContext = null;
+  hideEditableAnswer();
   try {
     if (!hasActiveAIProfile(ui.config.ai)) throw new Error('请先在设置中配置 API Key');
 
@@ -613,10 +727,13 @@ export async function askAIFusionMode() {
       displayContent = `${selectionSource}图像分析结果（包含自定义要求）：\n${aiContent}`;
     }
     if (parsed && problem) {
+      lastAnswerContext = { problem, slideId: currentSlideId, parsed, aiContent };
       setAIAnswer(`${displayContent}\n\nAI 建议答案：${JSON.stringify(parsed)}`);
+      setEditableAnswer(parsed);
     } else {
       if (!problem) displayContent += '\n\n💡 当前页面不是题目页面（或未识别到题目）。';
       setAIAnswer(displayContent);
+      hideEditableAnswer();
     }
   } catch (e) {
     setAILoading(false);

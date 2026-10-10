@@ -1,0 +1,39 @@
+name: Stability Audit
+
+on:
+  push:
+    branches:
+      - fix/stability-auto-answer-20260916
+  pull_request:
+    paths:
+      - 'ykt-helper/**'
+      - '.github/workflows/stability-audit.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ykt-helper
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ykt-helper/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run regression tests
+        run: npm test
+
+      - name: Build userscript
+        run: npm run build

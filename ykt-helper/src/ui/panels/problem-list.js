@@ -195,6 +195,30 @@ function bindRowActions(row, e, prob){
   };
   actionsBar.appendChild(btnAI);
 
+  // AI 强制作答：直接分析并提交；过期题目需要二次确认后走补交接口
+  const btnForceAI = create('button'); btnForceAI.textContent = 'AI强制作答';
+  btnForceAI.onclick = async () => {
+    const ps = repo.problemStatus?.get?.(e.problemId);
+    const end = Number(ps?.endTime ?? e.endTime ?? prob?.endTime);
+    const expired = Number.isFinite(end) && Date.now() >= end;
+    if (expired && !window.confirm('这道题已过截止时间，AI 将使用强制补交接口。继续吗？')) return;
+
+    row.classList.add('loading');
+    btnForceAI.disabled = true;
+    try {
+      const result = await actions.forceAIAnswer(e.problemId, { forceRetry: expired });
+      if (!result?.ok) ui.toast(`AI 强制作答未完成：${result?.error?.message || result?.reason || '未知原因'}`, 4000);
+      else ui.toast(expired ? 'AI 作答完成并已补交' : 'AI 作答完成');
+      updateProblemList();
+    } catch (error) {
+      ui.toast(`AI 强制作答失败：${error?.message || error}`, 4000);
+    } finally {
+      btnForceAI.disabled = false;
+      row.classList.remove('loading');
+    }
+  };
+  actionsBar.appendChild(btnForceAI);
+
   // 修改后刷新题目
   const btnRefresh = create('button'); btnRefresh.textContent = '刷新题目';
   btnRefresh.onclick = async () => {
@@ -279,7 +303,7 @@ function updateRow(row, e, prob){
       const { route } = await submitAnswer(
         { problemId: e.problemId, problemType: e.problemType },
         result,
-        { startTime, endTime }
+        { startTime, endTime, autoGate: false, waitMs: 0 }
       );
       ui.toast(route==='answer' ? '提交成功' : '补交成功');
       const merged = Object.assign({}, prob||{}, { result }, { status: { ...(prob?.status||{}), answered: true } });
@@ -295,7 +319,7 @@ function updateRow(row, e, prob){
             await submitAnswer(
               { problemId: e.problemId, problemType: e.problemType },
               result,
-              { startTime, endTime, forceRetry: true }
+              { startTime, endTime, forceRetry: true, autoGate: false, waitMs: 0 }
             );
             ui.toast('补交成功');
             const merged = Object.assign({}, prob||{}, { result }, { status: { ...(prob?.status||{}), answered: true } });
@@ -322,7 +346,7 @@ function updateRow(row, e, prob){
       await submitAnswer(
         { problemId: e.problemId, problemType: e.problemType },
         result,
-        { startTime, endTime, forceRetry: true }
+        { startTime, endTime, forceRetry: true, autoGate: false, waitMs: 0 }
       );
       ui.toast('补交成功');
       const merged = Object.assign({}, prob||{}, { result }, { status: { ...(prob?.status||{}), answered: true } });
