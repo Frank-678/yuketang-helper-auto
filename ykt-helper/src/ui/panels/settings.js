@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG } from '../../core/types.js';
 import { storage } from '../../core/storage.js';
 import { screenWakeLock } from '../../core/screen-wake-lock.js';
 import { applyProfileForm, readReminderForm, syncReminderForm } from '../../core/settings-form.js';
+import { downloadDiagnostics } from '../../core/diagnostics.js';
 
 let mounted = false;
 let root;
@@ -400,6 +401,11 @@ export function mountSettingsPanel() {
     ui.updateAutoAnswerBtn();
     await screenWakeLock.setEnabled(false);
     ui.toast('设置已重置');
+  });
+
+  root.querySelector('#ykt-btn-export-diag')?.addEventListener('click', () => {
+    downloadDiagnostics({ version: __SCRIPT_VERSION__, autoAnswer: !!ui.config.autoAnswer, autoJoin: !!ui.config.autoJoinEnabled });
+    ui.toast('诊断日志已导出');
   });
 
   // 音频设置

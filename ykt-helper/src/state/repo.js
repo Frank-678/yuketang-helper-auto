@@ -17,13 +17,17 @@ export const repo = {
   setPresentation(id, data) {
     this.presentations.set(id, { id, ...data });
     const key = this.currentLessonId ? `presentations-${this.currentLessonId}` : 'presentations';
-    storage.alterMap(key, (m) => {
-      m.set(id, data);
-      // 仍然做容量裁剪
-      const max = (storage.get('config', {})?.maxPresentations ?? 5);
-      const excess = m.size - max;
-      if (excess > 0) [...m.keys()].slice(0, excess).forEach(k => m.delete(k));
-    });
+    try {
+      storage.alterMap(key, (m) => {
+        m.set(id, data);
+        // 仍然做容量裁剪
+        const max = (storage.get('config', {})?.maxPresentations ?? 5);
+        const excess = m.size - max;
+        if (excess > 0) [...m.keys()].slice(0, excess).forEach(k => m.delete(k));
+      });
+    } catch {
+      // QuotaExceededError: in-memory map above already populated; persist later when space frees.
+    }
   },
 
   upsertSlide(slide) { this.slides.set(slide.id, slide); },

@@ -1,6 +1,7 @@
 // src/net/xhr-interceptor.js
 import { gm } from '../core/env.js';
 import { actions } from '../state/actions.js';
+import { diag } from '../core/diagnostics.js';
 
 export function installXHRInterceptor() {
   class MyXHR extends XMLHttpRequest {
@@ -60,6 +61,7 @@ export function installXHRInterceptor() {
         try {
           const { problemId, result } = JSON.parse(payload || '{}');
           if (resp && (resp.code === 0 || resp.success)) {
+            diag('page-answer', { problemId, result });
             actions.onAnswerProblem(problemId, result);
           }
         } catch (e) {

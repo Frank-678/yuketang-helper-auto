@@ -149,13 +149,43 @@ export async function queryAI(question, aiCfg, options = {}) {
         }
       },
       onerror: () => reject(new Error('网络请求失败')),
+      ontimeout: () => reject(new Error('AI 请求超时（30 秒）')),
       timeout: 30000,
     });
   });
 }
 
-// 通用 OpenAI 协议聊天请求封装（用于 Vision 两步调用）
-function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs = 60000) {
+// 同一时间只发一个 AI 请求：免费档常见 RPM=3，并发请求只会互相挤出 429。
+let aiQueue = Promise.resolve();
+function enqueueAI(task) {
+  const run = aiQueue.then(task, task);
+  aiQueue = run.catch(() => {});
+  return run;
+}
+
+const RATE_LIMIT_MAX_RETRIES = 3;
+
+function rateLimitDelayMs(message, attempt) {
+  const m = String(message || '').match(/after\s+(\d+(?:\.\d+)?)\s*second/i);
+  const hinted = m ? Math.ceil(Number(m[1]) * 1000) + 500 : 0;
+  return Math.max(hinted, [5000, 12000, 21000][attempt] || 21000);
+}
+
+// 通用 OpenAI 协议聊天请求封装（用于 Vision 两步调用）；遇到 429 时按提示退避重试。
+async function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs = 60000) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await enqueueAI(() => chatCompletionOnce(profile, payload, debugLabel, timeoutMs));
+    } catch (e) {
+      if (e?.status !== 429 || attempt >= RATE_LIMIT_MAX_RETRIES) throw e;
+      const wait = rateLimitDelayMs(e.message, attempt);
+      console.warn(`[雨课堂助手]${debugLabel} 触发限流(429)，${Math.round(wait / 1000)} 秒后重试 (${attempt + 1}/${RATE_LIMIT_MAX_RETRIES})`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+}
+
+function chatCompletionOnce(profile, payload, debugLabel, timeoutMs) {
   const url = makeChatUrl(profile);
 
   return new Promise((resolve, reject) => {
@@ -186,7 +216,9 @@ function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs 
             } catch {
               errorMessage += ` - ${res.responseText}`;
             }
-            reject(new Error(errorMessage));
+            const error = new Error(errorMessage);
+            error.status = res.status;
+            reject(error);
             return;
           }
 
@@ -200,6 +232,12 @@ function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs 
       onerror: (err) => {
         console.error(`[雨课堂助手]${debugLabel} 网络请求失败:`, err);
         reject(new Error('网络请求失败'));
+      },
+      ontimeout: () => {
+        console.error(`[雨课堂助手]${debugLabel} 请求超时 (${Math.round(timeoutMs / 1000)}s)`);
+        const error = new Error(`AI 请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+        error.timeout = true;
+        reject(error);
       },
     });
   });

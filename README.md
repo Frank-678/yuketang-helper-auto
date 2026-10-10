@@ -5,8 +5,8 @@
   <a href="https://github.com/HITweihai/yuketang-helper-auto/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="license"/>
   </a>
-  <a href="./release/ykt-helper-1216.user.js">
-    <img src="https://img.shields.io/badge/version-1.21.6-blue.svg" alt="版本">
+  <a href="./release/ykt-helper-1217.user.js">
+    <img src="https://img.shields.io/badge/version-1.21.7-blue.svg" alt="版本">
   </a>
   <a href="#">
     <img src="https://img.shields.io/badge/platform-Chrome%20%7C%20Edge-green.svg" alt="适配平台">
@@ -22,19 +22,15 @@
        Yuketang Helper Auto
     </h3>
     <h3 align="center">
-       适用于雨课堂/荷塘雨课堂
+       适用于雨课堂/荷塘雨课堂/长江雨课堂等所有版本
     </h3>
 </html>
 
-> 最后更新时间：2026.09.11
+> 最后更新时间：2026.10.10
 
 ## 项目说明
 
-- 项目灵感来自于：[雨课堂助手](https://github.com/hotwords123/yuketang-helper.git)，本项目已兼容`ykt-helper v1.5.1`。
-
-- 项目兼容：[清华大学荷塘雨课堂助手-AI版](https://github.com/DragonAura/THU-Yuketang-Helper-AI)，但是不建议同时使用2种AI答题。
-
-- 项目兼容：[雨课堂考试助手](https://github.com/soundstarrain/yuketang-assistant)，如果有考试使用需要，请移步该项目。
+- 项目继承于：[雨课堂 / 荷塘雨课堂开源 AI 学习助手｜Open-source Yuketang / Rain Classroom AI learning assistant](https://github.com/ZaytsevZY/yuketang-helper-auto)
 
 - 注意：本项目暂时不支持扫描雨课堂**动态二维码**，如果你修读的课程使用动态二维码，我们无法提供摸鱼方面的帮助。
 
@@ -48,19 +44,13 @@
   - 使用edge，你需要打开**拓展-管理拓展-开发者模式**，再开启篡改猴插件中的**允许注入脚本**和**允许访问文件URL权限**
   - 使用chrome，你需要打开 **（右上角三点）-拓展程序-管理拓展程序-开发者模式**，再开启插件面板中的**允许运行用户脚本**和**允许访问文件网址**
 
-- 可直接[安装 1.21.6 发布脚本](https://raw.githubusercontent.com/HITweihai/yuketang-helper-auto/feat/recover-auto-answer-1215/release/ykt-helper-1216.user.js)。
+- 可直接[安装此 fork 的 1.21.7 发布脚本](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/rebuild/1.21.7-from-1.21.4/release/ykt-helper-1217.user.js)。
 
-- 也可以[安装 GreasyFork 的稳定版本](https://update.greasyfork.org/scripts/531469/AI%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B.user.js)；它通常不是最新版本。
-
-  - 如需查看上游开发中的版本，请到上游仓库的 `dev-2.0` 分支获取。
-
-  - 此 fork 的各版本成品位于 [`release/`](./release) 目录。
-
-  - 你可以在`/ykt-helper-allinone`获取更早的版本
+  - 各版本成品位于 [`release/`](./release) 目录。
 
 - 或手动创建新脚本，将 `release/ykt-helper-<版本号>.user.js` 的内容复制到篡改猴的新建脚本中。
 
-- 当前构建版本为 `1.21.6`，支持：
+- 当前构建版本为 `1.21.7`，支持：
 
   - `148.0.7778.98-chrome`及以下的chrome
 
@@ -68,7 +58,7 @@
 
 ## 源代码
 
-- 我们重构的代码放在 [`ykt-helper/src`](./ykt-helper/src) 文件夹中，建议在此处加入新功能或进行修改；
+- 我们的代码放在 [`ykt-helper/src`](./ykt-helper/src) 文件夹中，建议在此处加入新功能或进行修改；
 
 - 关于代码的开发和组装方法，请参考[脚本的开发和组装](./ykt-helper/readme.md)。
 
@@ -224,6 +214,8 @@
 请在[更新记录](./changelog.md)中查看详细的更新记录。
 
 ---
+
+- 1.21.7：修复1.21.3以来的关键不可用功能：AI自动作答
 
 - 1.21.4: 修复不限时题目因空 `limit` 被判定为立即过期，恢复不限时题目的自动作答并在活动题目列表中显示“不限时”；新增可选的重复弹幕自动跟发（7 条窗口、3 条阈值、60 秒分轮、每轮最多 2 条）
 

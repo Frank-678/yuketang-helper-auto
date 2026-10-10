@@ -41,6 +41,12 @@ export function dispatchRealtimeMessage(message, {
     case 'lessonfinished':
       handlers.onLessonFinished?.(options);
       break;
+    case 'problemfinished':
+      handlers.onProblemFinished?.(realtime.problemId, options);
+      break;
+    case 'extendtime':
+      handlers.onExtendTime?.(realtime.problem, options);
+      break;
     default:
       handled = false;
   }

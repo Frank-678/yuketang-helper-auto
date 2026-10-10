@@ -6,7 +6,8 @@ import terser from '@rollup/plugin-terser';
 import { meta } from './userscript.meta.js';
 
 /** 产物文件名 */
-export const OUT_FILE = 'dist/ykt-helper-1216.user.js';
+export const OUT_FILE = 'dist/ykt-helper-1217.user.js';
+export const SCRIPT_VERSION = '1.21.7';
 
 export default {
   input: 'src/index.js',
@@ -37,7 +38,8 @@ export default {
       preventAssignment: true,
       values: {
         __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
-        __BUILD_VERSION__: JSON.stringify(process.env.BUILD_VERSION || 'dev')
+        __BUILD_VERSION__: JSON.stringify(process.env.BUILD_VERSION || 'dev'),
+        __SCRIPT_VERSION__: JSON.stringify(SCRIPT_VERSION)
       }
     }),
 
