@@ -115,39 +115,6 @@
             <span class="checkmark"></span>
             启用自动作答
           </label>
-          <small>题目首次出现时按延迟设置自动分析并提交。</small>
-        </div>
-        <div class="setting-item">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ykt-input-auto-recover-unanswered">
-            <span class="checkmark"></span>
-            刷新后恢复已排队/被中断的 AI 作答
-          </label>
-          <small>只恢复刷新前已经记录为“待作答”或“作答中”的题目；不会默认扫描历史课件。</small>
-        </div>
-        <div class="setting-item">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ykt-input-auto-recover-expired">
-            <span class="checkmark"></span>
-            刷新后自动强制补交已过期题目
-          </label>
-          <small>需要同时开启上项；已过截止时间时会调用补交接口，风险较高，默认关闭。</small>
-        </div>
-        <div class="setting-item">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ykt-input-auto-scan-unanswered">
-            <span class="checkmark"></span>
-            自动扫描当前课程中未作答题目
-          </label>
-          <small>仅当前课程已缓存题目；会主动让 AI 尝试未作答题，可能包含旧题，默认关闭。</small>
-        </div>
-        <div class="setting-item">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ykt-input-auto-force-retry">
-            <span class="checkmark"></span>
-            允许截止后自动强制补交
-          </label>
-          <small>仅在同时开启自动作答时生效；服务器拒绝补交时不会重复提交。</small>
         </div>
         <div class="setting-item">
           <label class="checkbox-label">
@@ -158,6 +125,23 @@
           <small>开启后，进入“AI 解答”面板即自动向 AI 询问当前题目</small>
         </div>
         <div class="setting-item">
+          <label for="ykt-submission-policy">自动答案处理：</label>
+          <select id="ykt-submission-policy"><option value="auto">正常提交，必要时强制补交</option><option value="normal">只正常提交，结束后保留本地</option><option value="local">只生成并保存本地</option></select>
+          <small>人工编辑优先。提交结果不明时先核实服务器，不盲目重复提交。</small>
+        </div>
+        <div class="setting-item">
+          <label for="ykt-quick-mode">快答模式：</label>
+          <select id="ykt-quick-mode"><option value="auto">按时间自动</option><option value="on">强制开启</option><option value="off">强制关闭</option></select>
+          <small>快答控制模型与顺序，提交方式独立。强制关闭时不会因剩余时间少而开启。</small>
+        </div>
+        <div class="setting-item">
+          <label for="ykt-quick-times">快答时间点：</label><input id="ykt-quick-times" placeholder="例如 10:00, 14:30">
+          <small>按浏览器本地时间，每个时间点前 1 分钟至后 10 分钟；仅自动模式使用。</small>
+        </div>
+        <div class="setting-item"><label for="ykt-fast-profile">快答配置：</label><select id="ykt-fast-profile"></select><small>未配置时显示降级原因并使用常规模型。</small></div>
+        <div class="setting-item"><label class="checkbox-label"><input type="checkbox" id="ykt-answer-verify"><span class="checkmark"></span>使用独立模型复核</label></div>
+        <div class="setting-item"><label for="ykt-verify-profile">复核配置：</label><select id="ykt-verify-profile"></select><small>常规作答优先在提交前复核；快答可先提交，差异修正仍需服务器接受。复核建议不等于已经更新。</small></div>
+        <div class="setting-item">
           <label for="ykt-input-answer-delay">作答延迟时间 (秒):</label>
           <input type="number" id="ykt-input-answer-delay" min="1" max="60">
           <small>题目出现后等待多长时间开始作答</small>
@@ -166,33 +150,6 @@
           <label for="ykt-input-random-delay">随机延迟范围 (秒):</label>
           <input type="number" id="ykt-input-random-delay" min="0" max="30">
           <small>在基础延迟基础上随机增加的时间范围</small>
-        </div><div class="setting-item">
-          <label for="ykt-input-answer-priority-times">快速作答时间点：</label>
-          <input type="text" id="ykt-input-answer-priority-times" placeholder="例如：10:00, 14:30">
-          <small>每个时间点前 1 分钟至后 10 分钟使用快速模型；按浏览器本地时间计算。</small>
-        </div>
-        <div class="setting-item">
-          <label for="ykt-ai-fast-profile">快速作答配置：</label>
-          <select id="ykt-ai-fast-profile"></select>
-          <small>未选择或配置不可用时回退到当前 AI 配置。</small>
-        </div>
-        <div class="setting-item">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ykt-input-answer-verification">
-            <span class="checkmark"></span>
-            使用准确模型复核并纠错
-          </label>
-          <small>快速模型首次提交后复核一次；发现不同答案时最多重新提交一次。</small>
-        </div>
-        <div class="setting-item">
-          <label for="ykt-ai-verify-profile">复核模型配置：</label>
-          <select id="ykt-ai-verify-profile"></select>
-          <small>建议选择与快速模型不同且更准确的配置。</small>
-        </div>
-        <div class="setting-item">
-          <label for="ykt-input-verification-delay">复核等待 (秒):</label>
-          <input type="number" id="ykt-input-verification-delay" min="0" max="60">
-          <small>首次提交后等待多久再调用复核模型，通常保持 0 即可。</small>
         </div><div class="setting-item">
           <label class="checkbox-label">
             <input type="checkbox" id="ykt-ai-pick-main-first">
@@ -221,22 +178,6 @@
             新题 / 答题开始
           </label>
           <small>老师开启一道可作答习题时提醒。</small>
-        </div>
-        <div class="setting-item">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ykt-input-notify-danmu-round-start" />
-            <span class="checkmark"></span>
-            新一轮弹幕开始
-          </label>
-          <small>与上一条弹幕间隔达到 60 秒后，收到新一轮第一条弹幕时提醒。</small>
-        </div>
-        <div class="setting-item">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ykt-input-notify-danmu-follow-trigger" />
-            <span class="checkmark"></span>
-            7 条弹幕达到跟发条件
-          </label>
-          <small>连续 7 条弹幕在 30 秒内达到条件时提醒；出现次数最多的文本胜出，并列时取最新一条。</small>
         </div>
         <div class="setting-item">
           <label class="checkbox-label">
@@ -362,7 +303,7 @@
             <span class="checkmark"></span>
             重复弹幕自动跟发
           </label>
-          <small>开启后，当前班级连续 7 条弹幕在 30 秒内会自动跟发出现次数最多的文本；并列时跟发最新一条。相邻弹幕间隔达到 60 秒视为新一轮，每轮最多跟发 2 条，同一文本每轮只跟发一次。需要课堂弹幕输入框可用。</small>
+          <small>开启后，30 秒内凑齐 7 条有效他人弹幕后跟发频率最高文本（并列选最新）；每轮最长 60 秒、最多 2 条，同一文本每轮一次。输入框有草稿时不发送，以出站消息确认已发出。</small>
         </div>
         <div class="setting-item">
           <label class="checkbox-label">

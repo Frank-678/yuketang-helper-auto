@@ -26,7 +26,7 @@ export function applyProfileForm(profile, fields = {}) {
     baseUrl: text(fields.baseUrl) || profile.baseUrl,
     apiKey: text(fields.apiKey),
     model: text(fields.model) || profile.model,
-    visionModel: text(fields.visionModel) || profile.visionModel,
+    visionModel: text(fields.visionModel),
     temperature,
   };
 

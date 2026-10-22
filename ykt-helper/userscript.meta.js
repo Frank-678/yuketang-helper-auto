@@ -4,7 +4,10 @@ export const meta = `
 // ==UserScript==
 // @name         AI雨课堂助手（JS版）
 // @namespace    https://github.com/ZaytsevZY/yuketang-helper-auto
-// @version      1.21.7
+// @version      1.22.0
+// @homepageURL  https://github.com/Frank-678/yuketang-helper-auto
+// @downloadURL  https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper.user.js
+// @updateURL    https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper.user.js
 // @description  课堂习题提示，AI解答习题
 // @license      MIT
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=yuketang.cn
@@ -41,7 +44,5 @@ export const meta = `
 // @grant        GM_saveTab
 // @grant        unsafeWindow
 // @run-at       document-start
-// @require      https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js
-// @require      https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.min.js
 // ==/UserScript==
 `;

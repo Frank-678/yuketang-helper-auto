@@ -44,22 +44,6 @@ function getActiveProfile(configAI) {
   return list.find(p => p.id === id) || list[0];
 }
 
-function parsePriorityTimes(value) {
-  const raw = String(value || '')
-    .split(',')
-    .map(item => item.trim())
-    .filter(Boolean);
-  if (!raw.length) return [];
-
-  const windows = [];
-  for (const time of raw) {
-    const match = time.match(/^(\d{1,2}):(\d{2})$/);
-    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return null;
-    windows.push({ at: `${String(Number(match[1])).padStart(2, '0')}:${match[2]}` });
-  }
-  return windows;
-}
-
 // ------------------------------
 
 export function mountSettingsPanel() {
@@ -71,7 +55,10 @@ export function mountSettingsPanel() {
   document.body.appendChild(root.firstElementChild);
   root = document.getElementById('ykt-settings-panel');
 
-  const aiCfg = ui.config.ai || (ui.config.ai = {});
+  let draftAi = JSON.parse(JSON.stringify(ui.config.ai));
+  let formDirty = false;
+  root.addEventListener('input', () => { formDirty = true; });
+  const aiCfg = draftAi;
   ensureAIProfiles(aiCfg);
 
   // === 获取所有 AI Profile 相关的 DOM ===
@@ -92,28 +79,23 @@ export function mountSettingsPanel() {
   const $translateModel = root.querySelector('#ykt-ai-translate-model');
 
   // === 其他 UI 原有字段 ===
+  const $submissionPolicy = root.querySelector('#ykt-submission-policy');
+  const $quickMode = root.querySelector('#ykt-quick-mode');
+  const $quickTimes = root.querySelector('#ykt-quick-times');
+  const $fastProfile = root.querySelector('#ykt-fast-profile');
+  const $verifyProfile = root.querySelector('#ykt-verify-profile');
+  const $verification = root.querySelector('#ykt-answer-verify');
   const $auto = root.querySelector('#ykt-input-auto-answer');
   const $autoJoin = root.querySelector('#ykt-input-auto-join');
   const $autoJoinAutoAnswer = root.querySelector('#ykt-input-auto-join-auto-answer');
   const $autoAnalyze = root.querySelector('#ykt-input-ai-auto-analyze');
-  const $autoRecoverUnanswered = root.querySelector('#ykt-input-auto-recover-unanswered');
-  const $autoRecoverExpired = root.querySelector('#ykt-input-auto-recover-expired');
-  const $autoScanUnanswered = root.querySelector('#ykt-input-auto-scan-unanswered');
-  const $autoForceRetry = root.querySelector('#ykt-input-auto-force-retry');
   const $delay = root.querySelector('#ykt-input-answer-delay');
   const $rand = root.querySelector('#ykt-input-random-delay');
-  const $answerPriorityTimes = root.querySelector('#ykt-input-answer-priority-times');
-  const $fastAnswerProfile = root.querySelector('#ykt-ai-fast-profile');
-  const $answerVerification = root.querySelector('#ykt-input-answer-verification');
-  const $verifyAnswerProfile = root.querySelector('#ykt-ai-verify-profile');
-  const $verificationDelay = root.querySelector('#ykt-input-verification-delay');
   const $priority = root.querySelector('#ykt-ai-pick-main-first');
   const $notifyDur = root.querySelector('#ykt-input-notify-duration');
   const $notifyVol = root.querySelector('#ykt-input-notify-volume');
   const $notifyAll = root.querySelector('#ykt-input-notify-all');
   const $notifyProblemStart = root.querySelector('#ykt-input-notify-problem-start');
-  const $notifyDanmuRoundStart = root.querySelector('#ykt-input-notify-danmu-round-start');
-  const $notifyDanmuFollowTrigger = root.querySelector('#ykt-input-notify-danmu-follow-trigger');
   const $notifyAssessment = root.querySelector('#ykt-input-notify-assessment-publish');
   const $notifyCourseware = root.querySelector('#ykt-input-notify-courseware-publish');
   const $notifyOther = root.querySelector('#ykt-input-notify-other-publish');
@@ -138,8 +120,6 @@ export function mountSettingsPanel() {
   const reminderFields = {
     notifyProblems: $notifyAll,
     notifyProblemStarts: $notifyProblemStart,
-    notifyDanmuRoundStarts: $notifyDanmuRoundStart,
-    notifyDanmuFollowTriggers: $notifyDanmuFollowTrigger,
     notifyAssessmentPublishes: $notifyAssessment,
     notifyCoursewarePublishes: $notifyCourseware,
     notifyOtherPublishes: $notifyOther,
@@ -155,8 +135,9 @@ export function mountSettingsPanel() {
 
   // Profile UI
   function refreshProfileSelect() {
-    const ai = ui.config.ai;
+    const ai = draftAi;
     $profileSelect.innerHTML = '';
+    refreshRoleProfiles();
     ai.profiles.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.id;
@@ -166,35 +147,21 @@ export function mountSettingsPanel() {
     });
   }
 
-  function refreshAnswerProfileSelects() {
-    const ai = ui.config.ai;
-    const configs = [
-      [$fastAnswerProfile, '', '不使用快速模型', ui.config.fastAnswerProfileId],
-      [$verifyAnswerProfile, '', '不使用复核模型', ui.config.verifyAnswerProfileId],
-    ];
-
-    for (const [select, emptyValue, emptyLabel, selectedId] of configs) {
-      if (!select) continue;
-      select.innerHTML = '';
-      const empty = document.createElement('option');
-      empty.value = emptyValue;
-      empty.textContent = emptyLabel;
-      select.appendChild(empty);
-      ai.profiles.forEach(profile => {
-        const option = document.createElement('option');
-        option.value = profile.id;
-        option.textContent = profile.name || profile.id;
-        select.appendChild(option);
-      });
-      select.value = selectedId || '';
+  function refreshRoleProfiles() {
+    for (const [select, value] of [[$fastProfile, ui.config.fastAnswerProfileId], [$verifyProfile, ui.config.verifyAnswerProfileId]]) {
+      const selected = select.value || value || '';
+      select.replaceChildren();
+      const empty = document.createElement('option'); empty.value = ''; empty.textContent = '不单独指定'; select.appendChild(empty);
+      for (const p of draftAi.profiles) { const opt = document.createElement('option'); opt.value = p.id; opt.textContent = p.name || p.id; select.appendChild(opt); }
+      select.value = draftAi.profiles.some(p => p.id === selected) ? selected : '';
     }
   }
 
   function loadProfileToForm(profileId) {
-    const p = ui.config.ai.profiles.find(x => x.id === profileId);
+    const p = draftAi.profiles.find(x => x.id === profileId);
     if (!p) return;
 
-    ui.config.ai.activeProfileId = p.id;
+    draftAi.activeProfileId = p.id;
 
     $profileName.value = p.name || '';
     $baseUrl.value = p.baseUrl || '';
@@ -202,25 +169,33 @@ export function mountSettingsPanel() {
     $model.value = p.model || '';
     $visionModel.value = p.visionModel || '';
     $temperature.value = p.temperature ?? '';
-    $ocrApi.value = ui.config.ai.ocrApi || '';
-    $ocrApiKey.value = ui.config.ai.ocrApiKey || '';
-    $translateApi.value = ui.config.ai.translateApi || '';
-    $translateApiKey.value = ui.config.ai.translateApiKey || '';
-    $translateModel.value = ui.config.ai.translateModel || '';
+    $ocrApi.value = draftAi.ocrApi || '';
+    $ocrApiKey.value = draftAi.ocrApiKey || '';
+    $translateApi.value = draftAi.translateApi || '';
+    $translateApiKey.value = draftAi.translateApiKey || '';
+    $translateModel.value = draftAi.translateModel || '';
   }
 
   // 初始化 Profile 下拉框
   refreshProfileSelect();
-  refreshAnswerProfileSelects();
-  loadProfileToForm(ui.config.ai.activeProfileId);
+  loadProfileToForm(draftAi.activeProfileId);
 
   // 切换 profile
+  function retainProfileForm() {
+    const current = draftAi.profiles.find(p => p.id === draftAi.activeProfileId);
+    if (!current) return true;
+    return applyProfileForm(current, { name: $profileName.value, baseUrl: $baseUrl.value, apiKey: $api.value, model: $model.value, visionModel: $visionModel.value, temperature: $temperature.value }).ok;
+  }
   $profileSelect.addEventListener('change', () => {
+    if (!retainProfileForm()) { $profileSelect.value = draftAi.activeProfileId; ui.toast('请先修正 Temperature'); return; }
+    formDirty = true;
     loadProfileToForm($profileSelect.value);
   });
 
   // 添加 profile
   $profileAdd.addEventListener('click', () => {
+    if (!retainProfileForm()) return ui.toast('请先修正 Temperature');
+    formDirty = true;
     const id = `p_${Date.now().toString(36)}`;
     const newP = {
       id,
@@ -231,17 +206,16 @@ export function mountSettingsPanel() {
       visionModel: '',
       temperature: '',
     };
-    ui.config.ai.profiles.push(newP);
-    ui.config.ai.activeProfileId = id;
+    draftAi.profiles.push(newP);
+    draftAi.activeProfileId = id;
 
     refreshProfileSelect();
-    refreshAnswerProfileSelects();
     loadProfileToForm(id);
   });
 
   // 删除 profile
   $profileDel.addEventListener('click', () => {
-    const ai = ui.config.ai;
+    const ai = draftAi;
     if (ai.profiles.length <= 1) {
       ui.toast('至少保留一个配置', 2500);
       return;
@@ -251,37 +225,29 @@ export function mountSettingsPanel() {
     ai.activeProfileId = ai.profiles[0].id;
 
     refreshProfileSelect();
-    refreshAnswerProfileSelects();
     loadProfileToForm(ai.activeProfileId);
   });
 
   function syncFormFromConfig() {
-    ensureAIProfiles(ui.config.ai || (ui.config.ai = {}));
+    if (formDirty) return;
+    draftAi = JSON.parse(JSON.stringify(ui.config.ai));
+    ensureAIProfiles(draftAi || (draftAi = {}));
     refreshProfileSelect();
-    refreshAnswerProfileSelects();
-    loadProfileToForm(ui.config.ai.activeProfileId);
+    loadProfileToForm(draftAi.activeProfileId);
 
+    $submissionPolicy.value = ui.config.submissionPolicy || 'auto';
+    $quickMode.value = ui.config.quickAnswerMode || 'auto';
+    $quickTimes.value = Array.isArray(ui.config.answerPriorityTimes) ? ui.config.answerPriorityTimes.join(', ') : ui.config.answerPriorityTimes || '';
+    $fastProfile.value = ui.config.fastAnswerProfileId || '';
+    $verifyProfile.value = ui.config.verifyAnswerProfileId || '';
+    $verification.checked = !!ui.config.answerVerification;
     $autoJoin.checked = !!ui.config.autoJoinEnabled;
     $autoJoinAutoAnswer.checked = !!ui.config.autoAnswerOnAutoJoin;
     $auto.checked = !!ui.config.autoAnswer;
-    $autoForceRetry.checked = !!ui.config.autoForceRetry;
     $autoAnalyze.checked = !!ui.config.aiAutoAnalyze;
-    $autoRecoverUnanswered.checked = !!ui.config.autoRecoverUnanswered;
-    $autoRecoverExpired.checked = !!ui.config.autoRecoverExpired;
-    $autoScanUnanswered.checked = !!ui.config.autoScanUnanswered;
     $iftex.checked = !!ui.config.iftex;
-    $delay.value = Math.floor((ui.config.autoAnswerDelay || 3000) / 1000);
-    $rand.value = Math.floor((ui.config.autoAnswerRandomDelay || 1500) / 1000);
-    $answerPriorityTimes.value = (Array.isArray(ui.config.answerPriorityWindows)
-      ? ui.config.answerPriorityWindows
-      : [])
-      .map(item => typeof item === 'string' ? item : (item?.at || item?.time || ''))
-      .filter(Boolean)
-      .join(', ');
-    $fastAnswerProfile.value = ui.config.fastAnswerProfileId || '';
-    $answerVerification.checked = !!ui.config.answerVerification;
-    $verifyAnswerProfile.value = ui.config.verifyAnswerProfileId || '';
-    $verificationDelay.value = Math.floor((ui.config.answerVerificationDelay || 0) / 1000);
+    $delay.value = Math.floor((ui.config.autoAnswerDelay ?? 3000) / 1000);
+    $rand.value = Math.floor((ui.config.autoAnswerRandomDelay ?? 1500) / 1000);
     $priority.checked = ui.config.aiSlidePickPriority !== false;
     $notifyDur.value = Math.floor((ui.config.notifyPopupDuration || 5000) / 1000);
     $notifyVol.value = Math.round(100 * (ui.config.notifyVolume ?? 0.6));
@@ -299,18 +265,14 @@ export function mountSettingsPanel() {
   // 保存设置
 
   root.querySelector('#ykt-btn-settings-save').addEventListener('click', async () => {
+    const times = $quickTimes.value.split(/[,，\s]+/).filter(Boolean);
+    if (times.some(t => !/^(?:[01]?\d|2[0-3]):[0-5]\d$/.test(t))) return ui.toast('快答时间请使用 HH:MM，例如 10:00, 14:30');
     // --- 保存当前 Profile ---
-    const ai = ui.config.ai;
+    const ai = draftAi;
     const pid = ai.activeProfileId;
     const p = ai.profiles.find(x => x.id === pid);
     if (!p) {
       ui.toast('当前 AI 配置不存在，请重新选择后保存', 3000);
-      return;
-    }
-
-    const priorityWindows = parsePriorityTimes($answerPriorityTimes.value);
-    if (priorityWindows === null) {
-      ui.toast('时间点格式应为 HH:mm，例如 10:00, 14:30', 3000);
       return;
     }
 
@@ -336,32 +298,30 @@ export function mountSettingsPanel() {
     if (curOpt) curOpt.textContent = p.name || p.id;
 
     ai.kimiApiKey = p.apiKey;
-    storage.set('kimiApiKey', p.apiKey);
+
+    ui.config.submissionPolicy = $submissionPolicy.value;
+    ui.config.quickAnswerMode = $quickMode.value;
+    ui.config.answerPriorityTimes = times;
+    ui.config.fastAnswerProfileId = $fastProfile.value;
+    ui.config.verifyAnswerProfileId = $verifyProfile.value;
+    ui.config.answerVerification = $verification.checked;
     ui.config.autoJoinEnabled = !!$autoJoin.checked;
     ui.config.autoAnswerOnAutoJoin = !!$autoJoinAutoAnswer.checked;
     ui.config.autoAnswer = !!$auto.checked;
-    ui.config.autoForceRetry = !!$autoForceRetry.checked;
     ui.config.aiAutoAnalyze = !!$autoAnalyze.checked;
-    ui.config.autoRecoverUnanswered = !!$autoRecoverUnanswered.checked;
-    ui.config.autoRecoverExpired = !!$autoRecoverExpired.checked;
-    ui.config.autoScanUnanswered = !!$autoScanUnanswered.checked;
     ui.config.autoAnswerDelay = Math.max(1000, (+$delay.value || 0) * 1000);
     ui.config.autoAnswerRandomDelay = Math.max(0, (+$rand.value || 0) * 1000);
-    ui.config.answerPriorityWindows = priorityWindows;
-    ui.config.fastAnswerProfileId = $fastAnswerProfile.value || '';
-    ui.config.answerVerification = !!$answerVerification.checked;
-    ui.config.verifyAnswerProfileId = $verifyAnswerProfile.value || '';
-    ui.config.answerVerificationDelay = Math.max(0, Math.min(60, (+$verificationDelay.value || 0))) * 1000;
-    refreshAnswerProfileSelects();
     ui.config.iftex = !!$iftex.checked;
     ui.config.aiSlidePickPriority = !!$priority.checked;
     ui.config.notifyPopupDuration = Math.max(2000, (+$notifyDur.value || 0) * 1000);
-    ui.config.notifyVolume = Math.max(0, Math.min(1, (+$notifyVol.value || 60) / 100));
+    ui.config.notifyVolume = Math.max(0, Math.min(1, ($notifyVol.value === '' ? 60 : +$notifyVol.value) / 100));
     Object.assign(ui.config, readReminderForm(reminderFields));
     ui.config.autoFollowDanmu = !!$autoFollowDanmu.checked;
     ui.config.keepScreenAwake = !!$keepScreenAwake.checked;
 
-    ui.saveConfig();
+    ui.config.ai = JSON.parse(JSON.stringify(draftAi));
+    if (!ui.saveConfig()) return;
+    formDirty = false;
     document.getElementById('ykt-btn-bell')?.classList.toggle('active', ui.config.notifyProblems);
     ui.updateAutoAnswerBtn();
     const wakeLockStatus = await screenWakeLock.setEnabled(ui.config.keepScreenAwake);
@@ -383,20 +343,11 @@ export function mountSettingsPanel() {
   root.querySelector('#ykt-btn-settings-reset').addEventListener('click', async () => {
     if (!confirm('确定要重置为默认设置吗？')) return;
 
-    Object.assign(ui.config, JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
-
-    ensureAIProfiles(ui.config.ai);
-
-    ui.config.autoJoinEnabled = false;
-    ui.config.autoAnswerOnAutoJoin = true;
-    ui.config.autoRecoverUnanswered = false;
-    ui.config.autoRecoverExpired = false;
-    ui.config.autoScanUnanswered = false;
+    if (!ui.resetConfig()) return;
+    formDirty = false;
+    draftAi = JSON.parse(JSON.stringify(ui.config.ai));
     syncFormFromConfig();
 
-    storage.set('kimiApiKey', '');
-
-    ui.saveConfig();
     document.getElementById('ykt-btn-bell')?.classList.toggle('active', ui.config.notifyProblems);
     ui.updateAutoAnswerBtn();
     await screenWakeLock.setEnabled(false);
@@ -422,7 +373,7 @@ export function mountSettingsPanel() {
       const reader = new FileReader();
       reader.onload = () => {
         const src = reader.result;
-        ui.setCustomNotifyAudio({ src, name: f.name });
+        if (!ui.setCustomNotifyAudio({ src, name: f.name })) return;
         $audioName.textContent = `当前：${f.name}`;
         ui._playNotifySound(ui.config.notifyVolume);
         ui.toast('已应用自定义提示音');
@@ -441,7 +392,7 @@ export function mountSettingsPanel() {
         return;
       }
 
-      ui.setCustomNotifyAudio({ src: url, name: '' });
+      if (!ui.setCustomNotifyAudio({ src: url, name: '' })) return;
       $audioName.textContent = '当前：（自定义URL）';
       ui._playNotifySound(ui.config.notifyVolume);
       ui.toast('已应用自定义音频URL');
@@ -456,7 +407,7 @@ export function mountSettingsPanel() {
 
   if ($clear) {
     $clear.addEventListener('click', () => {
-      ui.setCustomNotifyAudio({ src: '', name: '' });
+      if (!ui.setCustomNotifyAudio({ src: '', name: '' })) return;
       $audioName.textContent = '当前：使用内置“叮-咚”提示音';
       ui.toast('已清除自定义音频');
     });

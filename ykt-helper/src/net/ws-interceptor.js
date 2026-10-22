@@ -36,20 +36,21 @@ export function installWSInterceptor({ getRuntimeMode = () => 'desktop' } = {}) 
     return envType;
   }
 
-  class MyWebSocket extends WebSocket {
+  if ((gm.uw || window).WebSocket?.__yktInstalled) return;
+  const NativeSocket = (gm.uw || window).WebSocket;
+  class MyWebSocket extends NativeSocket {
     static handlers = [];
     static addHandler(h) { this.handlers.push(h); }
     constructor(url, protocols) {
-      super(url, protocols);
+      if (protocols === undefined) super(url); else super(url, protocols);
+      this.__yktLessonId = lessonIdFromPath(location.pathname);
+      this.__yktAccountId = repo.accountId;
       const parsed = new URL(url, location.href);
       for (const h of this.constructor.handlers) h(this, parsed);
     }
     intercept(cb) {
       const raw = this.send;
-      this.send = (data) => {
-        try { cb(JSON.parse(data)); } catch {}
-        return raw.call(this, data);
-      };
+      this.send = (data) => { const result = raw.call(this, data); try { cb(JSON.parse(data)); } catch {} return result; };
     }
     listen(cb) { this.addEventListener('message', (e) => { try { cb(JSON.parse(e.data)); } catch {} }); }
   }
@@ -73,31 +74,15 @@ MyWebSocket.addHandler((ws, url) => {
     }
     console.log('[雨课堂助手][INFO] 检测到雨课堂WebSocket连接:', wsPath);
 
-    const routeLessonId = lessonIdFromPath((gm.uw || window)?.location?.pathname || location.pathname);
-    if (routeLessonId && !pendingManagedLessonId) {
-      ws.__yktLessonId = routeLessonId;
-      repo.markLessonConnected(routeLessonId, ws);
-      const clearNativeSocket = () => {
-        if (repo.lessonSockets.get(routeLessonId) === ws) {
-          repo.markLessonDisconnected(routeLessonId, 'native-close');
-        }
-      };
-      ws.addEventListener('close', clearNativeSocket);
-      ws.addEventListener('error', clearNativeSocket);
-    }
-
     // 发送侧拦截（可用于调试）
     ws.intercept((message) => {
-      const confirmed = confirmDanmuSend(message);
-      console.log('[雨课堂助手][INFO] WebSocket发送:', {
-        op: message?.op || message?.type || null,
-        lessonId: getSocketLessonId(ws),
-        danmuConfirmed: confirmed > 0,
-      });
+      if (message.op === 'hello' && message.lessonid) { ws.__yktLessonId = String(message.lessonid); repo.markLessonConnected(ws.__yktLessonId, ws); }
+      window.dispatchEvent(new CustomEvent('ykt:danmu-outbound', { detail: { lessonId: getSocketLessonId(ws), message } }));
     });
 
     // 接收侧统一分发
     ws.listen((message) => {
+      if (ws.__yktAccountId !== repo.accountId) return;
       try {
         console.log('[雨课堂助手][INFO] WebSocket接收:', message);
         if (message?.op && message.op !== 'xintiao' && message.op !== 'newdanmu') {
@@ -123,7 +108,7 @@ MyWebSocket.addHandler((ws, url) => {
             },
             onDanmu(danmu, options) {
               console.log('[雨课堂助手][INFO] 收到弹幕:', danmu?.danmu);
-              void actions.onDanmu(danmu, options);
+              actions.onDanmu(danmu, options);
             },
             onPublishEvent(event, options) {
               console.log('[雨课堂助手][INFO] 收到课堂发布:', event);
@@ -144,7 +129,7 @@ MyWebSocket.addHandler((ws, url) => {
           },
         });
         if (!dispatched.handled) {
-          console.log('[雨课堂助手][WARN] 未知WebSocket操作:', message?.op || message?.type || null);
+          console.log('[雨课堂助手][WARN] 未知WebSocket操作:', message.op, message);
         }
         // 监听后端传递的url
         const url = (function findUrl(obj){
@@ -157,7 +142,7 @@ MyWebSocket.addHandler((ws, url) => {
       if (url) {
         window.dispatchEvent(new CustomEvent('ykt:url-change', { detail: { url, raw: message } }));
         // 如需持久化到 repo，请取消下一行注释（确保已在 repo 定义该字段）
-        repo.currentSelectedUrl = url;
+        if (String(getSocketLessonId(ws)) === String(repo.currentLessonId)) repo.currentSelectedUrl = url;
         console.debug('[雨课堂助手][INFO] 当前选择 URL:', url);
       }
       } catch (e) {
@@ -166,7 +151,9 @@ MyWebSocket.addHandler((ws, url) => {
     });
   });
 
-  gm.uw.WebSocket = MyWebSocket;
+  MyWebSocket.__yktInstalled = true;
+  (gm.uw || window).WebSocket = MyWebSocket;
+  window.WebSocket = MyWebSocket;
 }
 
 // ===== 主动为某个课堂建立/复用 WebSocket 连接 =====
@@ -182,14 +169,7 @@ export function connectOrAttachLessonWS({ lessonId, auth }) {
   // 根据当前域名选择 ws 地址
   const host = "wss://" + location.hostname + "/wsapp/";
 
-  const Socket = gm.uw?.WebSocket || WebSocket;
-  pendingManagedLessonId = String(lessonId);
-  let ws;
-  try {
-    ws = new Socket(host);
-  } finally {
-    pendingManagedLessonId = null;
-  }
+  const ws = new (gm.uw || window).WebSocket(host);
   ws.__yktLessonId = String(lessonId);
 
   ws.addEventListener('open', () => {
@@ -203,28 +183,17 @@ export function connectOrAttachLessonWS({ lessonId, auth }) {
         lessonid: lessonId // 关键：目标课堂
       };
       ws.send(JSON.stringify(hello));
-      console.log('[雨课堂助手][INFO][AutoJoin] 已发送 hello 握手:', {
-        lessonId: String(lessonId),
-        useridPresent: hello.userid !== undefined && hello.userid !== null,
-        authPresent: !!auth,
-      });
+      console.log('[雨课堂助手][INFO][AutoJoin] 已发送课堂握手:', lessonId);
     } catch (e) {
       console.error('[雨课堂助手][INFO][AutoJoin] 发送 hello 失败:', e);
     }
   });
 
-  let cleaned = false;
-  const cleanup = (reason) => {
-    if (cleaned) return;
-    cleaned = true;
-    repo.markLessonDisconnected(lessonId, reason);
-  };
   ws.addEventListener('close', () => {
-    cleanup('close');
+    if (repo.lessonSockets.get(lessonId) === ws) { repo.lessonSockets.delete(lessonId); repo.listeningLessons.delete(String(lessonId)); }
     console.log('[雨课堂助手][WARN][AutoJoin] 课堂 WS 关闭:', lessonId);
   });
   ws.addEventListener('error', (e) => {
-    cleanup('error');
     console.error('[雨课堂助手][ERR][AutoJoin] 课堂 WS 错误:', lessonId, e);
   });
 

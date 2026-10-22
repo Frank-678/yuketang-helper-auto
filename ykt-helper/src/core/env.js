@@ -32,15 +32,20 @@ export const gm = {
   uw: window.unsafeWindow || window,
 };
 
+const scriptLoads = new Map();
 export function loadScriptOnce(src) {
-  return new Promise((resolve, reject) => {
-    if ([...document.scripts].some(s => s.src === src)) return resolve();
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`Failed to load: ${src}`));
-    document.head.appendChild(s);
+  if (scriptLoads.has(src)) return scriptLoads.get(src);
+  const promise = new Promise((resolve, reject) => {
+    const existing = [...document.scripts].find(s => s.src === src);
+    const script = existing || document.createElement('script');
+    const finish = error => { clearTimeout(timer); script.removeEventListener('load', loaded); script.removeEventListener('error', failed); if (error) { scriptLoads.delete(src); if (!existing) script.remove(); reject(error); } else resolve(); };
+    const loaded = () => finish();
+    const failed = () => finish(new Error('外部工具加载失败，请稍后重试'));
+    const timer = setTimeout(() => finish(new Error('外部工具加载超时，请检查网络后重试')), 12000);
+    script.addEventListener('load', loaded, { once: true }); script.addEventListener('error', failed, { once: true });
+    if (!existing) { script.src = src; (document.head || document.documentElement).appendChild(script); }
   });
+  scriptLoads.set(src, promise); return promise;
 }
 
 export async function ensureHtml2Canvas() {
@@ -53,10 +58,10 @@ export async function ensureHtml2Canvas() {
 }
 
 export async function ensureJsPDF() {
-  if (window.jspdf?.jsPDF) return window.jspdf;
-  await loadScriptOnce('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
-  if (!window.jspdf?.jsPDF) throw new Error('jsPDF 未加载成功');
-  return window.jspdf;
+  const current = () => (gm.uw || window).jspdf || window.jspdf;
+  if (!current()?.jsPDF) await loadScriptOnce('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
+  if (!current()?.jsPDF) throw new Error('jsPDF 未加载成功');
+  window.jspdf = current(); return current();
 }
 
 export function randInt(l, r) {

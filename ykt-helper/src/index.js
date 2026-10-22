@@ -1,4 +1,4 @@
-﻿// src/index.js
+// src/index.js
 import { installWSInterceptor } from './net/ws-interceptor.js';
 import { installXHRInterceptor } from './net/xhr-interceptor.js';
 import { installFetchInterceptor } from './net/fetch-interceptor.js';
@@ -37,18 +37,15 @@ function maybeAutoReloadOnMount() {
     return false;
   }
 }
-let periodicReloadTimer = null;
-
 function startPeriodicReload(opts = {}) {
   try {
-    if (periodicReloadTimer !== null) return periodicReloadTimer;
     const intervalMs = Number.isFinite(opts.intervalMs) ? opts.intervalMs : 5 * 60 * 1000;
     const onlyWhenHidden = (opts.onlyWhenHidden !== false);
     const skipLessonPages = (opts.skipLessonPages !== false);
 
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
 
-      periodicReloadTimer = window.setInterval(() => {
+      window.setInterval(() => {
     try {
       console.log('[雨课堂助手]][DEBUG] periodic tick', {
         pathname: window.location.pathname,
@@ -70,10 +67,7 @@ function startPeriodicReload(opts = {}) {
       console.error(e);
     }
   }, intervalMs);
-    return periodicReloadTimer;
-  } catch {
-    return null;
-  }
+  } catch {}
 }
 
 let desktopStarted = false;
@@ -82,7 +76,7 @@ let runtimeBootQueued = false;
 function startDesktopRuntime() {
   if (desktopStarted) return;
   desktopStarted = true;
-  if (maybeAutoReloadOnMount()) return;
+
 
   diag('boot', { version: __SCRIPT_VERSION__, readyState: INJECTED_READY_STATE, autoAnswer: !!ui.config.autoAnswer });
   try {
@@ -93,12 +87,10 @@ function startDesktopRuntime() {
       clear: clearDiagnostics,
     };
   } catch {}
-  startPeriodicReload({ intervalMs: 1 * 60 * 1000, onlyWhenHidden: false, skipLessonPages: true });
+
   loadFA();
   injectStyles();
   ui._mountAll?.();
-  installXHRInterceptor();
-  installFetchInterceptor();
   installToolbar();
   actions.startAutoAnswerLoop();
   actions.launchLessonHelper();
@@ -108,7 +100,7 @@ function bootCurrentRuntime() {
   const pathname = window.location.pathname;
   // 根地址只是站点的跳转入口；/m/v2 会由 document-start 守卫改写，
   // 在改写完成前不启动任何课堂运行时。
-  if (shouldStartDesktopRuntime(pathname)) startDesktopRuntime();
+  if (shouldStartDesktopRuntime(pathname)) { startDesktopRuntime(); actions.launchLessonHelper(); }
 }
 
 function queueRuntimeBoot() {
@@ -133,12 +125,14 @@ function installRuntimeRouteWatcher() {
     if (typeof original !== 'function') continue;
     history[key] = function (...args) {
       const result = original.apply(this, args);
+      actions.launchLessonHelper();
       queueRuntimeBoot();
       return result;
     };
   }
-  target.addEventListener?.('popstate', queueRuntimeBoot);
-  target.addEventListener?.('hashchange', queueRuntimeBoot);
+  const routeChanged = () => { actions.launchLessonHelper(); queueRuntimeBoot(); };
+  target.addEventListener?.('popstate', routeChanged);
+  target.addEventListener?.('hashchange', routeChanged);
 }
 
 (function main() {
@@ -149,11 +143,10 @@ function installRuntimeRouteWatcher() {
   });
   if (guard.redirected || guard.reason === 'loop-prevented') return;
 
-  // Periodic refresh is a base service, not a desktop-runtime side effect.
-  // It keeps running across SPA route changes, but each tick still skips /lesson/ pages.
-  startPeriodicReload({ intervalMs: 1 * 60 * 1000, onlyWhenHidden: false, skipLessonPages: true });
-
-  // WebSocket needs to be patched at document-start.
+  installXHRInterceptor();
+  installFetchInterceptor();
+  actions.launchLessonHelper();
+  // Capture the native sockets before any UI or DOM-dependent work.
   installWSInterceptor({
     getRuntimeMode: () => getRuntimeMode(window.location.pathname),
   });

@@ -58,3 +58,11 @@ test('compares equivalent choice and text answers after normalization', async ()
   assert.equal(compareParsedAnswers(problem, { content: '  同一个答案\n' }, { content: '同一个答案' }), true);
   assert.equal(compareParsedAnswers(problem, ['A'], ['B']), false);
 });
+
+test('explicit quick mode overrides clock windows in both directions', async () => {
+  const { selectAnswerProfile } = await import('../src/core/answer-priority.js');
+  const cfg = { profiles: [{ id: 'normal' }, { id: 'fast' }], activeProfileId: 'normal', fastAnswerProfileId: 'fast' };
+  assert.equal(selectAnswerProfile(cfg, { role: 'fast', windows: [], quickMode: 'on' }).id, 'fast');
+  const now = new Date(2026, 9, 22, 10, 0).getTime();
+  assert.equal(selectAnswerProfile(cfg, { role: 'fast', windows: ['10:00'], now, quickMode: 'off' }).id, 'normal');
+});

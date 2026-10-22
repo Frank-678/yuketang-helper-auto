@@ -1,99 +1,31 @@
-// src/net/xhr-interceptor.js
 import { gm } from '../core/env.js';
-import { actions } from '../state/actions.js';
-import { diag } from '../core/diagnostics.js';
+import { repo } from '../state/repo.js';
+import { observeResponse, requestLessonId } from './submission-observer.js';
 
 export function installXHRInterceptor() {
-  class MyXHR extends XMLHttpRequest {
-    static handlers = [];
-    static addHandler(h) { this.handlers.push(h); }
-    open(method, url, async) {
-      const parsed = new URL(url, location.href);
-      for (const h of this.constructor.handlers) h(this, method, parsed);
-      return super.open(method, url, async ?? true);
-    }
-    intercept(cb) {
-      let payload;
-      const rawSend = this.send;
-      this.send = (body) => { payload = body; return rawSend.call(this, body); };
-      this.addEventListener('load', () => {
-        try { cb(JSON.parse(this.responseText), payload); } catch {}
-      });
-    }
-  }
-
-  function detectEnvironmentAndAdaptAPI() {
-    const hostname = location.hostname;
-    if (hostname === 'www.yuketang.cn') { console.log('[雨课堂助手][INFO] 检测到标准雨课堂环境'); return 'standard'; }
-    if (hostname === 'pro.yuketang.cn') { console.log('[雨课堂助手][INFO] 检测到荷塘雨课堂环境'); return 'pro'; }
-    if (hostname === 'changjiang.yuketang.cn') { console.log('[雨课堂助手][INFO] 检测到长江雨课堂环境'); return 'changjiang'; }
-    console.log('[雨课堂助手][ERR] 未知环境:', hostname); return 'unknown';
-  }
-
-  MyXHR.addHandler((xhr, method, url) => {
-    const envType = detectEnvironmentAndAdaptAPI();
-    const pathname = url.pathname || '';
-    console.log('[雨课堂助手][INFO] XHR请求:', method, pathname, url.search);
-
-    // 课件：精确路径或包含关键字
-    if (
-      pathname === '/api/v3/lesson/presentation/fetch' ||
-      (pathname.includes('presentation') && pathname.includes('fetch'))
-    ) {
-      console.log('[雨课堂助手][INFO] 拦截课件请求');
-      xhr.intercept((resp) => {
-        const id = url.searchParams.get('presentation_id');
-        console.log('[雨课堂助手][INFO] 课件响应:', resp);
-        if (resp && (resp.code === 0 || resp.success)) {
-          actions.onPresentationLoaded(id, resp.data || resp.result);
-        }
-      });
-      return;
-    }
-
-    // 答题
-    if (
-      pathname === '/api/v3/lesson/problem/answer' ||
-      (pathname.includes('problem') && pathname.includes('answer'))
-    ) {
-      console.log('[雨课堂助手][INFO] 拦截答题请求');
-      xhr.intercept((resp, payload) => {
+  for (const surface of new Set([window, gm.uw])) {
+    const proto = surface?.XMLHttpRequest?.prototype;
+    if (!proto || proto.__yktInstalled) continue;
+    const nativeOpen = proto.open, nativeSend = proto.send;
+    proto.open = function(...args) {
+      this.__yktUrl = String(args[1]);
+      this.__yktLessonId = requestLessonId(this.__yktUrl, repo.currentLessonId);
+      return nativeOpen.apply(this, args);
+    };
+    proto.send = function(body) {
+      const url = this.__yktUrl || '', lessonId = this.__yktLessonId;
+      if (/lesson|presentation|slides|problem/.test(url)) this.addEventListener('load', () => {
         try {
-          const { problemId, result } = JSON.parse(payload || '{}');
-          if (resp && (resp.code === 0 || resp.success)) {
-            diag('page-answer', { problemId, result });
-            actions.onAnswerProblem(problemId, result);
-          }
-        } catch (e) {
-          console.error('[雨课堂助手][ERR] 解析答题响应失败:', e);
-        }
-      });
-      return;
-    }
-
-    if (url.pathname === '/api/v3/lesson/problem/retry') {
-      xhr.intercept((resp, payload) => {
-        try {
-          // retry 请求体是 { problems: [{ problemId, result, ...}] }
-          const body = JSON.parse(payload || '{}');
-          const first = Array.isArray(body?.problems) ? body.problems[0] : null;
-          if (resp?.code === 0 && first?.problemId) {
-            actions.onAnswerProblem(first.problemId, first.result);
-          }
+          const json = this.responseType === 'json' ? this.response : JSON.parse(this.responseText);
+          observeResponse(url, json, body, { lessonId, own: this.__yktOwnSubmission === true });
         } catch {}
-      });
-      return;
-    }
-    if (pathname.includes('/api/')) {
-      console.log('[雨课堂助手][WARN] 其他API:', method, pathname);
-    }
-  });
-
-  gm.uw.XMLHttpRequest = MyXHR;
-
+      }, { once: true });
+      return nativeSend.apply(this, arguments);
+    };
+    proto.__yktInstalled = true;
+  }
 }
 
-// ===== 自动进入课堂所需的最小 API 封装 =====
 export async function getOnLesson() {
   const origin = location.origin;
   const same = (p) => new URL(p, origin).toString();

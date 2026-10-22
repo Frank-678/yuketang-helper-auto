@@ -25,3 +25,7 @@ dist-ssr
 
 # Temporary files
 temp/
+
+# Python build/maintenance cache
+__pycache__/
+*.py[cod]

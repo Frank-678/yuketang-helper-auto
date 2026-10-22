@@ -35,7 +35,7 @@ function compact(value, depth = 0) {
 /** 记录一条诊断事件。 */
 export function diag(event, detail = {}) {
   const list = load();
-  list.push({ at: Date.now(), path: location.pathname, event, ...compact(detail) });
+  list.push({ at: Date.now(), path: globalThis.location?.pathname || '', event, ...compact(detail) });
   if (list.length > MAX_ENTRIES * 1.5) entries = list.slice(-MAX_ENTRIES);
   scheduleSave();
 }
@@ -59,7 +59,7 @@ export function exportDiagnostics(meta = {}) {
   };
   const lines = load().map(e => {
     const { at, event, path, ...rest } = e;
-    const t = new Date(at).toLocaleTimeString('zh-CN', { hour12: false });
+    const t = new Date(at).toISOString();
     return `${t} ${event} ${path} ${JSON.stringify(rest)}`;
   });
   return `${JSON.stringify(header)}\n${lines.join('\n')}\n`;

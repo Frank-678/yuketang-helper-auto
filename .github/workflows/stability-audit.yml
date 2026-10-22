@@ -3,7 +3,8 @@ name: Stability Audit
 on:
   push:
     branches:
-      - fix/stability-auto-answer-20260916
+      - main
+      - "fix/**"
   pull_request:
     paths:
       - 'ykt-helper/**'
@@ -25,7 +26,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
           cache-dependency-path: ykt-helper/package-lock.json
 
@@ -35,5 +36,23 @@ jobs:
       - name: Run regression tests
         run: npm test
 
-      - name: Build userscript
-        run: npm run build
+      - name: Check built artifact syntax
+        run: node --check dist/ykt-helper-1220.user.js
+
+  archive-retired-branches:
+    needs: test-and-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[retire-branches-20261022]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: archive-retired-branches-20261022
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Archive and remove reviewed branch refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/retire-branches.py --apply

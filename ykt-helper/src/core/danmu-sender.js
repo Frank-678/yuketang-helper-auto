@@ -1,6 +1,3 @@
-const DEFAULT_CONFIRMATION_MS = 1500;
-const pendingSends = [];
-
 function dispatchInputEvent(input, type) {
   if (typeof input?.dispatchEvent !== 'function') return;
   const EventCtor = input.ownerDocument?.defaultView?.Event || globalThis.Event;
@@ -36,131 +33,30 @@ function setInputValue(input, text) {
   dispatchInputEvent(input, 'change');
 }
 
-function normalizeOperation(value) {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function getOperation(message) {
-  return normalizeOperation(message?.op || message?.type || message?.action);
-}
-
-function findDanmuText(source, visited = new Set()) {
-  if (!source || typeof source !== 'object' || visited.has(source)) return null;
-  visited.add(source);
-
-  for (const key of ['danmu', 'barrage', 'text']) {
-    if (typeof source[key] === 'string' && source[key].trim()) return source[key];
-  }
-
-  for (const key of ['data', 'payload', 'message', 'msg', 'content']) {
-    const nested = source[key];
-    if (nested && typeof nested === 'object') {
-      const text = findDanmuText(nested, visited);
-      if (text) return text;
-    }
-  }
+function outboundText(message) {
+  if (!message || typeof message !== 'object') return null;
+  for (const k of ['danmu', 'text', 'barrage']) if (typeof message[k] === 'string') return message[k];
+  for (const k of ['data', 'payload', 'message', 'msg']) { const value = outboundText(message[k]); if (value) return value; }
   return null;
 }
-
-function isDanmuSendMessage(message) {
-  const operation = getOperation(message);
-  if (!(operation.includes('danmu')
-    || operation.includes('barrage')
-    || operation === 'sendmessage'
-    || operation === 'sendchat')) return false;
-  return !!findDanmuText(message);
-}
-
-/**
- * Resolve the oldest pending DOM send when the WebSocket interceptor sees a
- * matching outbound barrage frame.  Returns the number of resolved sends.
- */
-export function confirmDanmuSend(message) {
-  if (!isDanmuSendMessage(message)) return 0;
-  const outboundText = findDanmuText(message);
-  const index = pendingSends.findIndex(item => (
-    item.text === outboundText || item.text.trim() === String(outboundText).trim()
-  ));
-  if (index === -1) return 0;
-
-  const [pending] = pendingSends.splice(index, 1);
-  clearTimeout(pending.timer);
-  pending.resolve({
-    sent: true,
-    verified: true,
-    text: pending.text,
-  });
-  return 1;
-}
-
-function waitForConfirmation(text, timeoutMs) {
-  let pending;
-  const promise = new Promise(resolve => {
-    pending = {
-      text,
-      resolve,
-      timer: setTimeout(() => {
-        const index = pendingSends.indexOf(pending);
-        if (index !== -1) pendingSends.splice(index, 1);
-        resolve({
-          sent: false,
-          verified: false,
-          text,
-          reason: 'send-unconfirmed',
-        });
-      }, timeoutMs),
+/** A matching outbound frame proves dispatch, not server acceptance. */
+export async function sendDanmuText(text, { root = globalThis.document, lessonId = null, awaitConfirmationMs = 2000 } = {}) {
+  if (!String(text || '').trim()) return { sent: false, reason: 'empty' };
+  const input = root?.querySelector?.('.send__input'), button = root?.querySelector?.('.send__btn');
+  if (!input || !button) return { sent: false, reason: 'controls-unavailable' };
+  if (String(input.value ?? input.textContent ?? '').trim() || root.activeElement === input) return { sent: false, reason: 'user-editing' };
+  if (button.disabled || typeof button.click !== 'function') return { sent: false, reason: 'send-disabled' };
+  return new Promise(resolve => {
+    let done = false;
+    const finish = result => { if (done) return; done = true; clearTimeout(timer); window.removeEventListener('ykt:danmu-outbound', onOutbound); resolve({ text, ...result }); };
+    const onOutbound = event => {
+      const detail = event.detail || {}, op = String(detail.message?.op || detail.message?.type || '').toLowerCase();
+      if (lessonId != null && String(detail.lessonId) !== String(lessonId)) return;
+      if (!/danmu|barrage|sendmessage|sendchat/.test(op)) return;
+      if (outboundText(detail.message) === text) finish({ sent: true, dispatched: true, confirmed: false });
     };
-    pendingSends.push(pending);
+    const timer = setTimeout(() => { if (input.value === text) setInputValue(input, ''); finish({ sent: false, unknown: true, reason: 'no-outbound-observed' }); }, awaitConfirmationMs);
+    window.addEventListener('ykt:danmu-outbound', onOutbound);
+    try { setInputValue(input, text); button.click(); } catch (error) { if (input.value === text) setInputValue(input, ''); finish({ sent: false, reason: 'send-error', error }); }
   });
-  return { promise, pending };
-}
-
-/** Send one text through the native classroom barrage controls. */
-export async function sendDanmuText(text, {
-  root = globalThis.document,
-  awaitConfirmationMs = DEFAULT_CONFIRMATION_MS,
-} = {}) {
-  if (typeof text !== 'string' || !text.trim()) {
-    return { sent: false, verified: false, text, reason: 'empty' };
-  }
-
-  try {
-    const input = root?.querySelector?.('.send__input');
-    const button = root?.querySelector?.('.send__btn');
-    if (!input || !button) {
-      return { sent: false, verified: false, text, reason: 'controls-unavailable' };
-    }
-    if (button.disabled || button.getAttribute?.('aria-disabled') === 'true') {
-      return { sent: false, verified: false, text, reason: 'send-disabled' };
-    }
-    if (typeof button.click !== 'function') {
-      return { sent: false, verified: false, text, reason: 'send-unavailable' };
-    }
-
-    const timeout = Math.max(0, Number.isFinite(Number(awaitConfirmationMs))
-      ? Number(awaitConfirmationMs)
-      : DEFAULT_CONFIRMATION_MS);
-    const confirmation = waitForConfirmation(text, timeout);
-    try {
-      setInputValue(input, text);
-      button.click();
-    } catch (error) {
-      const index = pendingSends.indexOf(confirmation.pending);
-      if (index !== -1) pendingSends.splice(index, 1);
-      clearTimeout(confirmation.pending.timer);
-      return { sent: false, verified: false, text, reason: 'send-error', error };
-    }
-    return await confirmation.promise;
-  } catch (error) {
-    return {
-      sent: false,
-      verified: false,
-      text,
-      reason: 'send-error',
-      error,
-    };
-  }
 }

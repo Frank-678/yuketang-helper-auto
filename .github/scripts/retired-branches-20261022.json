@@ -1,0 +1,106 @@
+[
+  {
+    "branch": "audit/full-regression-20260917",
+    "sha": "b38daf939d4d03ae6b9f9a5aa21143f5060a3ce9"
+  },
+  {
+    "branch": "audit/independent-blackbox-20260917",
+    "sha": "8e123ae913e48156950dd94d0cf9bdb5b1bc6f37"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-real",
+    "sha": "8f5ae400338ace1f5d1302686d81a04e17b65331"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-scenario",
+    "sha": "8f5ae400338ace1f5d1302686d81a04e17b65331"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-scratch",
+    "sha": "8f5ae400338ace1f5d1302686d81a04e17b65331"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-scratch-2",
+    "sha": "8f5ae400338ace1f5d1302686d81a04e17b65331"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-validation",
+    "sha": "4b78acbc4ae420fa21410f430c4203e41eae3214"
+  },
+  {
+    "branch": "backup-before-b85ca499",
+    "sha": "b2fa1f5fe5d56f672e5d2049e257b8ae009c2d2f"
+  },
+  {
+    "branch": "backup/pre-core-rebuild-20260917",
+    "sha": "0af2f7fa5ab13eb2c9283a741c8586d3d3c4f25b"
+  },
+  {
+    "branch": "backup/pre-final-consolidation-20260917",
+    "sha": "6504f74c6922dcce024b63746436533ee7f48297"
+  },
+  {
+    "branch": "backup/pre-independent-blackbox-20260917",
+    "sha": "b38daf939d4d03ae6b9f9a5aa21143f5060a3ce9"
+  },
+  {
+    "branch": "backup/pre-restore-20260916",
+    "sha": "bbc690a758bb346ece9be45e07a3301b73c89999"
+  },
+  {
+    "branch": "backup/pre-restore-before-revert-20260916",
+    "sha": "bbc690a758bb346ece9be45e07a3301b73c89999"
+  },
+  {
+    "branch": "backup/pre-stability-fix-20260916",
+    "sha": "ed823033fcc64f65be955935bdb9419332e82bf8"
+  },
+  {
+    "branch": "chrome141",
+    "sha": "8075578d5902afa563cc579dbb8d116bc1208e54"
+  },
+  {
+    "branch": "dev-2.0",
+    "sha": "799f26a4f11b18a9cd799a7e0a80a2c8d9b06022"
+  },
+  {
+    "branch": "feat/dev3.0",
+    "sha": "ab0268b8e223af59e76944b2f4d10774df9480b3"
+  },
+  {
+    "branch": "feat/recover-auto-answer-1215",
+    "sha": "dd4b0bb3b43ed4b2bacd4791d92299bfe15e129e"
+  },
+  {
+    "branch": "fix/independent-audit-remediation-20260917",
+    "sha": "af37eb9ac6341f384f6ad7fc9be082b50270341a"
+  },
+  {
+    "branch": "fix/pr5-verification-and-save-feedback-20260920",
+    "sha": "9112debfc089f903a985f545199d2c748d4b18e9"
+  },
+  {
+    "branch": "fix/stability-auto-answer-20260916",
+    "sha": "35c5affb86f4be2a2c4c49b236a1c36049ab9bb6"
+  },
+  {
+    "branch": "main",
+    "sha": "0a5edb799629e71b92140b4a21f90105b31710ff"
+  },
+  {
+    "branch": "rebuild/1.21.7-from-1.21.4",
+    "sha": "f8dea761fc77193e8b2c1b813e1a041ae84329cc"
+  },
+  {
+    "branch": "restore/pre-revert-ed823033",
+    "sha": "b5f51f47e6ca5b8fb632cdc32922a9f6448969a7"
+  },
+  {
+    "branch": "revert-1-feat/recover-auto-answer-1215",
+    "sha": "922330ddb759224617fa59b8e2e47a20c1cf55a7"
+  },
+  {
+    "branch": "zy-dev",
+    "sha": "9c869e119b721ae9dd8dd5d11ec7aebfefb6f9c7"
+  }
+]

@@ -11,15 +11,9 @@ export function dispatchRealtimeMessage(message, {
   lessonId = null,
   handlers = {},
 } = {}) {
-  const eventContext = lessonId !== undefined && lessonId !== null && String(lessonId) !== ''
-    ? { lessonId: String(lessonId) }
-    : {};
-  const realtime = getRealtimeEvent(message, eventContext);
+  const realtime = getRealtimeEvent(message);
   const notificationOnly = getRuntimeMode() === 'mobile-reminder';
   const options = { notificationOnly };
-  if (realtime?.kind === 'timeline' || realtime?.kind === 'unlockproblem' || realtime?.kind === 'danmu') {
-    options.source = realtime.kind === 'timeline' ? 'timeline' : 'live';
-  }
   if (lessonId !== undefined && lessonId !== null && String(lessonId) !== '') {
     options.lessonId = String(lessonId);
   }

@@ -79,12 +79,13 @@ export function selectAnswerProfile(aiConfig, {
   windows = [],
   fastProfileId = aiConfig?.fastAnswerProfileId,
   verifyProfileId = aiConfig?.verifyAnswerProfileId,
+  quickMode = 'auto',
 } = {}) {
   const profiles = getProfiles(aiConfig);
   const active = getActiveProfile(profiles, aiConfig?.activeProfileId);
   if (!active) return null;
 
-  if (role === 'fast' && isWithinAnswerPriorityWindow(now, windows)) {
+  if (role === 'fast' && (quickMode === 'on' || (quickMode !== 'off' && isWithinAnswerPriorityWindow(now, windows)))) {
     return profiles.find(profile => profile.id === fastProfileId) || active;
   }
   if (role === 'verify') {

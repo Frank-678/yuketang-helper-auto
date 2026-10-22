@@ -6,8 +6,8 @@ import terser from '@rollup/plugin-terser';
 import { meta } from './userscript.meta.js';
 
 /** 产物文件名 */
-export const OUT_FILE = 'dist/ykt-helper-1217.user.js';
-export const SCRIPT_VERSION = '1.21.7';
+export const OUT_FILE = 'dist/ykt-helper-1220.user.js';
+export const SCRIPT_VERSION = '1.22.0';
 
 export default {
   input: 'src/index.js',
@@ -56,7 +56,11 @@ export default {
         indent_level: 2,
         comments: 'all'              // 保留全部注释（尤其是 Userscript 头）
       }
-    })
+    }),
+    {
+      name: 'normalize-userscript-whitespace',
+      renderChunk(code) { return { code: code.replace(/[ \t]+$/gm, ''), map: null }; }
+    }
   ],
   
   // 关键配置：禁用代码分割相关功能

@@ -1,22 +1,24 @@
+import { gm, loadScriptOnce } from '../../core/env.js';
 import tpl from './ai.html';
 import { ui } from '../ui-api.js';
 import { repo } from '../../state/repo.js';
 import { queryAI, queryAIVision} from '../../ai/openai.js';
 import { captureSlideImage } from '../../capture/screenshoot.js';
 import { parseAIAnswer } from '../../tsm/ai-format.js';
-import { actions, hasActiveAIProfile} from '../../state/actions.js'
-import { parseEditableAnswer, formatEditableAnswer } from '../../state/answer-editor.js';
+import { hasActiveAIProfile, actions } from '../../state/actions.js';
 import { getCurrentMainPageSlideId, waitForVueReady, watchMainPageChange } from '../../core/vuex-helper.js';
 
 const L = (...a) => console.log('[雨课堂助手][DBG][ai]', ...a);
 const W = (...a) => console.warn('[雨课堂助手][WARN][ai]', ...a);
 
+let analysisSequence = 0;
+let currentProblemContext = null;
+const pendingAnalyses = new Map();
 let mounted = false;
 let root;
 let preferredSlideFromPresentation = null; // 启用来自presentation的页面
 let preferredSlidesFromPresentation = []; // 手动多页（仅用于“提问当前PPT”的多选）
 let manualMultiSlidesArmed = false; // 只有手动触发时才允许多图
-let lastAnswerContext = null;
 
 function renderSelectedPPTPreview() {
   const box = document.getElementById('ykt-ai-selected');
@@ -59,11 +61,15 @@ function renderSelectedPPTPreview() {
   }
 }
 
-function ensureMathJax() {
-  const mj = window.MathJax;
-  const ok = !!(mj && mj.typesetPromise);
-  if (!ok) console.warn('[雨课堂助手][WARN][ai] MathJax 未就绪（未通过 @require 预置？）');
-  return Promise.resolve(ok);
+async function ensureMathJax() {
+  const target = gm.uw || window;
+  if (!target.MathJax?.typesetPromise) {
+    target.MathJax = target.MathJax || { tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] }, svg: { fontCache: 'global' } };
+    try { await loadScriptOnce('https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.min.js'); } catch { return false; }
+  }
+  window.MathJax = target.MathJax;
+  if (window.MathJax?.startup?.promise) await window.MathJax.startup.promise;
+  return !!window.MathJax?.typesetPromise;
 }
 
 function typesetTexIn(el) {
@@ -92,6 +98,11 @@ function safeLink(url = '') {
 }
 
 function mdToHtml(mdRaw = '') {
+  const protectedParts = [];
+  const keep = html => { const i = protectedParts.push(html) - 1; return `\uE000${i}\uE001`; };
+  mdRaw = String(mdRaw).replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_, lang, code) => keep(`<pre class="ykt-md-code"><code data-lang="${lang}">${escapeHtml(code)}</code></pre>`));
+  mdRaw = mdRaw.replace(/`([^`]+)`/g, (_, code) => keep(`<code>${escapeHtml(code)}</code>`));
+  mdRaw = mdRaw.replace(/\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+\$/g, math => keep(escapeHtml(math)));
   // 先整体转义，确保默认无 HTML 注入
   let md = escapeHtml(mdRaw).replace(/\r\n?/g, '\n');
 
@@ -180,7 +191,7 @@ function mdToHtml(mdRaw = '') {
     else { buf.push(ln); }
   }
   flush();
-  return out.join('\n');
+  return out.join('\n').replace(/\uE000(\d+)\uE001/g, (_, i) => protectedParts[Number(i)] || '');
 }
 
 function findSlideAcrossPresentations(idStr) {
@@ -260,11 +271,26 @@ export function mountAIPanel() {
 
   $('#ykt-ai-close')?.addEventListener('click', () => showAIPanel(false));
   $('#ykt-ai-ask')?.addEventListener('click', askAIFusionMode);
-  $('#ykt-ai-force-answer')?.addEventListener('click', forceAIAnswerForCurrent);
-  $('#ykt-ai-submit')?.addEventListener('click', submitEditedAnswer);
+  const answerEdit = $('#ykt-ai-answer-edit');
+  const mode = $('#ykt-ai-submit-mode');
+  answerEdit?.addEventListener('input', () => { if (currentProblemContext) repo.saveDraft(currentProblemContext.problem.problemId, answerEdit.value, currentProblemContext.lessonId); });
   $('#ykt-ai-reset-edit')?.addEventListener('click', () => {
-    if (lastAnswerContext?.parsed !== undefined) setEditableAnswer(lastAnswerContext.parsed);
+    if (!currentProblemContext?.problem.aiProposal) return;
+    answerEdit.value = JSON.stringify(currentProblemContext.problem.aiProposal);
+    repo.saveDraft(currentProblemContext.problem.problemId, answerEdit.value, currentProblemContext.lessonId);
   });
+  $('#ykt-ai-submit')?.addEventListener('click', async () => {
+    const ctx = currentProblemContext; if (!ctx) return;
+    if (mode.value === 'local') return ui.toast(repo.saveDraft(ctx.problem.problemId, answerEdit.value, ctx.lessonId) ? '草稿已保存本地，未提交' : '本地保存失败，草稿仍在编辑器');
+    try {
+      repo.saveDraft(ctx.problem.problemId, answerEdit.value, ctx.lessonId);
+      const revision = ctx.problem.draftRevision;
+      const outcome = await actions.submit(ctx.problem, answerEdit.value, { lessonId: ctx.lessonId, policy: mode.value, forceRetry: mode.value === 'retry', guard: () => { if (ctx.problem.draftRevision !== revision) throw new Error('草稿已变化，停止提交'); } });
+      ui.toast(outcome.route === 'retry' ? '补交已确认成功' : '提交已确认成功');
+    } catch (error) { setAIError(error.message); }
+  });
+  window.addEventListener('ykt:lesson-change', () => { analysisSequence++; currentProblemContext = null; preferredSlideFromPresentation = null; preferredSlidesFromPresentation = []; manualMultiSlidesArmed = false; setAILoading(false); $('#ykt-ai-edit-section').style.display = 'none'; });
+
 
   waitForVueReady().then(() => {
     watchMainPageChange((slideId, slideInfo) => {
@@ -287,7 +313,11 @@ export function mountAIPanel() {
     renderQuestion();
   });
 
-  window.addEventListener('ykt:open-ai', () => {
+  window.addEventListener('ykt:open-ai', (ev) => {
+    if (ev.detail?.slideId) {
+      preferredSlideFromPresentation = { slideId: String(ev.detail.slideId), imageUrl: '' };
+      preferredSlidesFromPresentation = []; manualMultiSlidesArmed = false;
+    }
     L('收到打开 AI 面板事件');
     showAIPanel(true);
   });
@@ -344,6 +374,7 @@ export function mountAIPanel() {
 
 export function showAIPanel(v = true) {
   mountAIPanel();
+  const wasVisible = root.classList.contains('visible');
   root.classList.toggle('visible', !!v);
   if (v) {
     renderQuestion();
@@ -381,111 +412,6 @@ export function setAIAnswer(content = '') {
 
 function getCustomPrompt() {
   const el = $('#ykt-ai-custom-prompt'); return el ? (el.value.trim() || '') : '';
-}
-
-function currentProblemStatus(problem) {
-  if (!problem?.problemId) return null;
-  const key = String(problem.problemId);
-  return repo.problemStatus.get(problem.problemId)
-    || repo.problemStatus.get(key)
-    || (Number.isNaN(Number(key)) ? null : repo.problemStatus.get(Number(key)))
-    || null;
-}
-
-function setEditableAnswer(value) {
-  const section = $('#ykt-ai-edit-section');
-  const textarea = $('#ykt-ai-answer-edit');
-  const validate = $('#ykt-ai-validate');
-  if (!section || !textarea) return;
-  section.style.display = '';
-  textarea.value = formatEditableAnswer(value);
-  if (validate) {
-    validate.textContent = '答案已解析，可提交前手动修改。';
-    validate.style.color = '#2e7d32';
-  }
-}
-
-function setEditableError(message) {
-  const validate = $('#ykt-ai-validate');
-  if (!validate) return;
-  validate.textContent = message;
-  validate.style.color = '#c62828';
-}
-
-function hideEditableAnswer() {
-  const section = $('#ykt-ai-edit-section');
-  if (section) section.style.display = 'none';
-}
-
-async function submitEditedAnswer() {
-  const problem = lastAnswerContext?.problem;
-  const textarea = $('#ykt-ai-answer-edit');
-  if (!problem || !textarea) {
-    setAIError('当前页面没有可提交的题目；请先选择题目页并进行 AI 分析。');
-    return;
-  }
-
-  const parsed = parseEditableAnswer(problem.problemType, textarea.value);
-  if (parsed === null) {
-    setEditableError('答案格式无法识别或为空，请填写 JSON 或题型对应的简写。');
-    return;
-  }
-
-  const status = currentProblemStatus(problem);
-  const endTime = Number(status?.endTime ?? problem.endTime);
-  const expired = Number.isFinite(endTime) && Date.now() >= endTime;
-  if (expired && !window.confirm('这道题已过截止时间，将使用强制补交接口。继续吗？')) return;
-
-  const button = $('#ykt-ai-submit');
-  if (button) button.disabled = true;
-  try {
-    const result = await actions.submitParsedAnswer(problem, parsed, { forceRetry: expired });
-    if (!result?.ok) throw new Error(result?.reason || '提交失败');
-    lastAnswerContext.parsed = parsed;
-    setAIError('');
-    setEditableAnswer(parsed);
-    ui.toast(expired ? '编辑答案已补交' : '编辑答案已提交', 3000);
-  } catch (error) {
-    setAIError(`编辑答案提交失败：${error?.message || error}`);
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-async function forceAIAnswerForCurrent() {
-  let problem = lastAnswerContext?.problem;
-  if (!problem) {
-    let sid = preferredSlideFromPresentation?.slideId || repo.currentSlideId;
-    // 主界面可能没有更新 repo.currentSlideId；此时从 Vuex 读取实际显示页。
-    if (!sid) {
-      try { sid = getCurrentMainPageSlideId(); } catch (_) {}
-    }
-    const look = getSlideByAny(sid);
-    problem = look.slide?.problem || null;
-  }
-  if (!problem?.problemId) {
-    setAIError('当前页面没有识别到题目，无法执行强制 AI 作答。');
-    return;
-  }
-  const status = currentProblemStatus(problem);
-  const endTime = Number(status?.endTime ?? problem.endTime);
-  const expired = Number.isFinite(endTime) && Date.now() >= endTime;
-  if (expired && !window.confirm('这道题已过截止时间，AI 将使用强制补交接口。继续吗？')) return;
-
-  const button = $('#ykt-ai-force-answer');
-  if (button) button.disabled = true;
-  try {
-    const result = await actions.forceAIAnswer(problem.problemId, { forceRetry: expired });
-    if (!result?.ok) throw new Error(result?.reason || result?.error?.message || '作答失败');
-    lastAnswerContext = lastAnswerContext || { problem };
-    lastAnswerContext.parsed = result.answer;
-    setEditableAnswer(result.answer);
-    ui.toast(expired ? 'AI 作答完成并已补交' : 'AI 作答完成', 3000);
-  } catch (error) {
-    setAIError(`强制 AI 作答失败：${error?.message || error}`);
-  } finally {
-    if (button) button.disabled = false;
-  }
 }
 
 function _logMapLookup(where, id) {
@@ -592,10 +518,12 @@ function renderQuestion() {
   }
 }
 
-export async function askAIFusionMode() {
+async function runAIFusionMode() {
+  const sequence = ++analysisSequence, lessonId = repo.currentLessonId;
+  const isCurrent = () => sequence === analysisSequence && String(lessonId) === String(repo.currentLessonId);
+  currentProblemContext = null;
+  const editSection = document.getElementById('ykt-ai-edit-section'); if (editSection) editSection.style.display = 'none';
   setAIError(''); setAILoading(true); setAIAnswer('');
-  lastAnswerContext = null;
-  hideEditableAnswer();
   try {
     if (!hasActiveAIProfile(ui.config.ai)) throw new Error('请先在设置中配置 API Key');
 
@@ -677,7 +605,7 @@ export async function askAIFusionMode() {
         const b64 = await captureSlideImage(sid);
         if (b64) images.push(b64);
       }
-      if (images.length === 0) throw new Error('无法获取所选页面图片，请确保页面已加载完成');
+      if (images.length !== ids.length) throw new Error(`所选 ${ids.length} 页中有 ${ids.length - images.length} 页图片失败，请重试；未发送不完整内容`);
       imageBase64OrList = images;
       // 消费一次：避免 aiAutoAnalyze 或后续调用误用多图
       manualMultiSlidesArmed = false;
@@ -712,6 +640,7 @@ export async function askAIFusionMode() {
     L('[ask] 调用 Vision API...');
     const aiContent = await queryAIVision(imageBase64OrList, textPrompt, ui.config.ai, {problemType,});
 
+    if (!isCurrent()) return;
     setAILoading(false);
     L('[ask] Vision API调用成功, 内容长度=', aiContent?.length);
 
@@ -727,19 +656,30 @@ export async function askAIFusionMode() {
       displayContent = `${selectionSource}图像分析结果（包含自定义要求）：\n${aiContent}`;
     }
     if (parsed && problem) {
-      lastAnswerContext = { problem, slideId: currentSlideId, parsed, aiContent };
+      const current = repo.problems.get(problem.problemId) || problem;
+      current.aiProposal = parsed; current.proposalRaw = aiContent; current.updatedAt = Date.now(); repo.persistWork(lessonId);
+      currentProblemContext = { problem: current, lessonId };
+      const editor = document.getElementById('ykt-ai-answer-edit');
+      if (editor) editor.value = current.draftText ?? JSON.stringify(parsed);
+      if (editSection) editSection.style.display = '';
       setAIAnswer(`${displayContent}\n\nAI 建议答案：${JSON.stringify(parsed)}`);
-      setEditableAnswer(parsed);
     } else {
       if (!problem) displayContent += '\n\n💡 当前页面不是题目页面（或未识别到题目）。';
       setAIAnswer(displayContent);
-      hideEditableAnswer();
     }
   } catch (e) {
+    if (!isCurrent()) return;
     setAILoading(false);
     W('[ask] 页面分析失败:', e);
     setAIError(`页面分析失败: ${e.message}`);
   }
+}
+
+export function askAIFusionMode() {
+  const fingerprint = JSON.stringify([repo.accountId, repo.currentLessonId, preferredSlideFromPresentation?.slideId, preferredSlidesFromPresentation.map(s => s.slideId), repo.currentSlideId, getCurrentMainPageSlideId(), getCustomPrompt(), ui.config.ai.activeProfileId]);
+  if (pendingAnalyses.has(fingerprint)) return pendingAnalyses.get(fingerprint);
+  const task = runAIFusionMode().finally(() => { if (pendingAnalyses.get(fingerprint) === task) pendingAnalyses.delete(fingerprint); });
+  pendingAnalyses.set(fingerprint, task); return task;
 }
 
 export async function askAIForCurrent() { return askAIFusionMode(); }

@@ -22,7 +22,7 @@ export function installToolbar() {
   // 事件绑定
   bar.querySelector('#ykt-btn-bell')?.addEventListener('click', () => {
     ui.config.notifyProblems = !ui.config.notifyProblems;
-    ui.saveConfig();
+    if (!ui.saveConfig()) return;
     ui.toast(`习题提醒：${ui.config.notifyProblems ? '开' : '关'}`);
     bar.querySelector('#ykt-btn-bell')?.classList.toggle('active', ui.config.notifyProblems);
   });
@@ -44,8 +44,10 @@ export function installToolbar() {
   });
 
   bar.querySelector('#ykt-btn-auto-answer')?.addEventListener('click', () => {
-    ui.config.autoAnswer = !ui.config.autoAnswer;
-    ui.saveConfig();
+    const active = !ui.config.autoAnswerPaused && (ui.config.autoAnswer || (ui.config.autoJoinEnabled && ui.config.autoAnswerOnAutoJoin));
+    ui.config.autoAnswer = !active;
+    ui.config.autoAnswerPaused = active;
+    if (!ui.saveConfig()) return;
     ui.toast(`自动作答：${ui.config.autoAnswer ? '开' : '关'}`);
     ui.updateAutoAnswerBtn();
   });

@@ -1,5 +1,6 @@
 // src/ai/kimi.js
 import { gm } from '../core/env.js';
+import { diag } from '../core/diagnostics.js';
 
 // 将后端 problemType 数字映射为 Step1/Step2 使用的 question_type 字符串
 // 约定：
@@ -21,7 +22,7 @@ function mapProblemTypeToQuestionType(problemType) {
   }
 }
 
-function getActiveProfile(aiCfg, profileId = null) {
+function getActiveProfile(aiCfg) {
   const cfg = aiCfg || {};
   const profiles = Array.isArray(cfg.profiles) ? cfg.profiles : [];
   if (!profiles.length) {
@@ -36,13 +37,18 @@ function getActiveProfile(aiCfg, profileId = null) {
       visionModel: 'moonshot-v1-8k-vision-preview',
     };
   }
-  const activeId = profileId ?? cfg.activeProfileId;
-  let p = profiles.find(profile => String(profile.id) === String(activeId));
+  const activeId = cfg.activeProfileId;
+  let p = profiles.find(p => p.id === activeId);
   if (!p) p = profiles[0];
   if (!p.baseUrl) p.baseUrl = 'https://api.moonshot.cn/v1/chat/completions';
   return p;
 }
 
+function imageDataUrl(value) {
+  const text = String(value);
+  if (/^data:image\/[^;]+;base64,/.test(text)) return text;
+  return `data:image/${text.startsWith('/9j/') ? 'jpeg' : 'png'};base64,${text}`;
+}
 function makeChatUrl(profile) {
 //   const base = (profile.baseUrl || 'https://api.moonshot.cn').replace(/\/+$/,'');
 //   return `${base}/v1/chat/completions`;   
@@ -75,7 +81,7 @@ const BASE_SYSTEM_PROMPT = [
   '   单选：格式要求：\n答案: [单个字母]\n解释: [选择理由]\n\n注意：只选一个，如A',
   '   多选：格式要求：\n答案: [多个字母用顿号分开]\n解释: [选择理由]\n\n注意：格式如A、B、C',
   '   投票：格式要求：\n答案: [单个字母]\n解释: [选择理由]\n\n注意：只选一个选项，如A',
-  '   填空/主观题: 格式要求：答案: [直接给出答案内容]，解释: [补充说明]',
+  '   填空：答案: JSON 字符串数组，按空位顺序保留公式、负号和区间；主观题：答案: 正文。随后另起一行解释。',
   '4) 若识别不到明确题目，直接使用回答用户输入的问题',
   '3) 如果PROMPT格式不正确，或者你只接收了图片，输出：',
   '   STATE: NO_PROMPT',
@@ -96,71 +102,33 @@ const VISION_GUIDE = [
  * 通用 OpenAI 协议文本模型调用
  */
 export async function queryAI(question, aiCfg, options = {}) {
-  const profile = getActiveProfile(aiCfg, options?.profileId);
-  if (!profile || !profile.apiKey) {
-    throw new Error('请先在设置中配置 AI API Key');
-  }
-
-  const url = makeChatUrl(profile);
-  const model = profile.model || 'gpt-4o-mini'; // 默认给一个合理值
-
-  return new Promise((resolve, reject) => {
-    gm.xhr({
-      method: 'POST',
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${profile.apiKey}`,
-      },
-      data: JSON.stringify(withProfileTemperature(profile, {
-        model,
-        messages: [
-          { role: 'system', content: BASE_SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: [
-                  '【文本模式说明】可能为题目文本，也可能为普通问答。请先执行决策闸，再回答。',
-                  '【用户输入（优先级最高）】',
-                  question || '（无）',
-                ].join('\n'),
-              },
-            ],
-          },
-        ],
-      })),
-      onload: (res) => {
-        try {
-          console.log('[雨课堂助手][AI OpenAI] Status:', res.status);
-          console.log('[雨课堂助手][AI OpenAI] Response:', res.responseText);
-
-          if (res.status !== 200) {
-            reject(new Error(`AI 接口请求失败: ${res.status}`));
-            return;
-          }
-          const data = JSON.parse(res.responseText);
-          const content = data.choices?.[0]?.message?.content;
-          if (content) resolve(content);
-          else reject(new Error('AI返回内容为空'));
-        } catch (e) {
-          reject(new Error(`解析API响应失败: ${e.message}`));
-        }
-      },
-      onerror: () => reject(new Error('网络请求失败')),
-      ontimeout: () => reject(new Error('AI 请求超时（30 秒）')),
-      timeout: 30000,
-    });
-  });
+  const profile = getActiveProfile(aiCfg);
+  if (!profile?.apiKey) throw new Error('请先配置 AI API Key');
+  const data = await chatCompletion(profile, { model: profile.model, messages: [{ role: 'system', content: BASE_SYSTEM_PROMPT }, { role: 'user', content: question }] }, '[AI Text]', options.timeout || 45000, options);
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error('AI 返回内容为空');
+  return content;
 }
 
 // 同一时间只发一个 AI 请求：免费档常见 RPM=3，并发请求只会互相挤出 429。
-let aiQueue = Promise.resolve();
-function enqueueAI(task) {
-  const run = aiQueue.then(task, task);
-  aiQueue = run.catch(() => {});
-  return run;
+let queueRunning = false;
+const pendingAI = [];
+function enqueueAI(task, context = {}) {
+  return new Promise((resolve, reject) => {
+    pendingAI.push({ task, context, resolve, reject, queuedAt: Date.now() });
+    const drain = async () => {
+      if (queueRunning) return;
+      queueRunning = true;
+      try {
+        while (pendingAI.length) {
+          pendingAI.sort((a, b) => (a.context.priorityDeadline ?? a.context.deadline ?? Infinity) - (b.context.priorityDeadline ?? b.context.deadline ?? Infinity) || a.queuedAt - b.queuedAt);
+          const next = pendingAI.shift();
+          try { next.context.guard?.(); next.resolve(await next.task()); } catch (error) { next.reject(error); }
+        }
+      } finally { queueRunning = false; }
+    };
+    queueMicrotask(drain);
+  });
 }
 
 const RATE_LIMIT_MAX_RETRIES = 3;
@@ -172,13 +140,25 @@ function rateLimitDelayMs(message, attempt) {
 }
 
 // 通用 OpenAI 协议聊天请求封装（用于 Vision 两步调用）；遇到 429 时按提示退避重试。
-async function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs = 60000) {
+async function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs = 60000, context = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await enqueueAI(() => chatCompletionOnce(profile, payload, debugLabel, timeoutMs));
+      return await enqueueAI(() => {
+        context.guard?.();
+        const remaining = Number.isFinite(context.deadline) ? context.deadline - Date.now() - 1500 : Infinity;
+        if (remaining < 1000) { const error = new Error('剩余时间不足，AI 请求未发出'); error.name = 'DeadlineError'; throw error; }
+        const actualProfile = context.resolveProfile?.() || profile;
+        if (!actualProfile?.apiKey) throw new Error('当前 AI 配置不可用');
+        const hasImage = payload.messages?.some(m => Array.isArray(m.content) && m.content.some(x => x.type === 'image_url'));
+        const actualPayload = context.resolveProfile ? { ...payload, model: hasImage ? actualProfile.visionModel || actualProfile.model : actualProfile.model } : payload;
+        diag('ai-dispatch', { profileId: actualProfile.id, model: actualPayload.model, deadline: context.deadline, timeoutMs: Math.min(timeoutMs, remaining) });
+        return chatCompletionOnce(actualProfile, actualPayload, debugLabel, Math.min(timeoutMs, remaining));
+      }, context);
     } catch (e) {
       if (e?.status !== 429 || attempt >= RATE_LIMIT_MAX_RETRIES) throw e;
       const wait = rateLimitDelayMs(e.message, attempt);
+      if (Number.isFinite(context.deadline) && Date.now() + wait + 1500 >= context.deadline) throw e;
+      context.guard?.();
       console.warn(`[雨课堂助手]${debugLabel} 触发限流(429)，${Math.round(wait / 1000)} 秒后重试 (${attempt + 1}/${RATE_LIMIT_MAX_RETRIES})`);
       await new Promise(r => setTimeout(r, wait));
     }
@@ -201,7 +181,7 @@ function chatCompletionOnce(profile, payload, debugLabel, timeoutMs) {
       onload: (res) => {
         try {
           console.log(`[雨课堂助手]${debugLabel} Status:`, res.status);
-          console.log(`[雨课堂助手]${debugLabel} Response:`, res.responseText);
+          console.debug(`[雨课堂助手]${debugLabel} 收到模型响应`);
 
           if (res.status !== 200) {
             let errorMessage = `AI 请求失败: ${res.status}`;
@@ -233,6 +213,7 @@ function chatCompletionOnce(profile, payload, debugLabel, timeoutMs) {
         console.error(`[雨课堂助手]${debugLabel} 网络请求失败:`, err);
         reject(new Error('网络请求失败'));
       },
+      onabort: () => reject(new Error('AI 请求已取消')),
       ontimeout: () => {
         console.error(`[雨课堂助手]${debugLabel} 请求超时 (${Math.round(timeoutMs / 1000)}s)`);
         const error = new Error(`AI 请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
@@ -256,7 +237,7 @@ async function singleStepVisionCall(profile, cleanBase64List, textPrompt, option
   for (const b64 of cleanBase64List) {
     imageBlocks.push({
       type: 'image_url',
-      image_url: { url: `data:image/png;base64,${b64}` },
+      image_url: { url: imageDataUrl(b64) },
     });
   }
 
@@ -285,7 +266,7 @@ async function singleStepVisionCall(profile, cleanBase64List, textPrompt, option
       messages,
     },
     '[AI OpenAI Vision 单步]',
-    timeoutMs,
+    timeoutMs, options,
   );
 
   const content = data.choices?.[0]?.message?.content;
@@ -301,15 +282,7 @@ async function singleStepVisionCall(profile, cleanBase64List, textPrompt, option
  * 通用 OpenAI 协议 Vision 模型（图像+文本）
  */
 export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}) {
-  const {
-    disableTwoStep = false,
-    twoStepDebug = false,
-    timeout: timeoutMs = 60000,
-    problemType = null,          // ← 新增：后端题型（数字或字符串都行）
-    profileId = null,
-  } = options || {};
-
-  const profile = getActiveProfile(aiCfg, profileId);
+  const profile = getActiveProfile(aiCfg);
   if (!profile || !profile.apiKey) {
     throw new Error('请先在设置中配置 AI API Key');
   }
@@ -318,13 +291,20 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
   const inputList = Array.isArray(imageBase64) ? imageBase64 : [imageBase64];
   const cleanBase64List = inputList
     .filter(Boolean)
-    .map(x => String(x).replace(/^data:image\/[^;]+;base64,/, ''))
+    .map(x => String(x))
     .filter(x => !!x);
   if (cleanBase64List.length === 0) throw new Error('图像数据格式错误');
 
   const visionModel = profile.visionModel || profile.model;
   const textModel = profile.model;
   const hasSeparateTextModel = !!textModel && textModel !== visionModel;
+
+  const {
+    disableTwoStep = false,
+    twoStepDebug = false,
+    timeout: timeoutMs = 60000,
+    problemType = null,          // ← 新增：后端题型（数字或字符串都行）
+  } = options || {};
 
   // -------- 0. 如果只有 VLM（或者显式关闭两步），回退到单步逻辑 --------
   if (!hasSeparateTextModel || disableTwoStep) {
@@ -334,7 +314,7 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
         disableTwoStep,
       });
     }
-    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { timeout: timeoutMs });
+    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { ...options, timeout: timeoutMs });
   }
 
   if (twoStepDebug) {
@@ -398,7 +378,7 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
       content: [
         ...cleanBase64List.map(b64 => ({
           type: 'image_url',
-          image_url: { url: `data:image/png;base64,${b64}` },
+          image_url: { url: imageDataUrl(b64) },
         })),
         textPrompt
           ? {
@@ -422,7 +402,7 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
         messages: step1Messages,
       },
       '[AI OpenAI Vision Step1]',
-      timeoutMs,
+      timeoutMs, options,
     );
 
     const content1 = data1.choices?.[0]?.message?.content || '';
@@ -435,13 +415,15 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
 
     structuredQuestion = JSON.parse(jsonMatch[0]);
   } catch (err) {
+    options.guard?.();
+    if (err.name === 'DeadlineError' || err.timeout || err.status) throw err;
     console.warn('[雨课堂助手][WARN][vision-step1] failed, fallback to single-step', err);
-    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { timeout: timeoutMs });
+    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { ...options, timeout: timeoutMs });
   }
 
   if (!structuredQuestion || !structuredQuestion.stem) {
     console.warn('[雨课堂助手][WARN][vision-step1] invalid structuredQuestion, fallback');
-    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { timeout: timeoutMs });
+    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { ...options, timeout: timeoutMs });
   }
 
   if (twoStepDebug) {
@@ -476,7 +458,7 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
   // 如果模型明确表示“必须依赖原始图像才能解题”，则回退到单步 Vision，避免纯文本推理丢失关键信息
   if (structuredQuestion.requires_image_for_solution === true) {
     console.warn('[雨课堂助手][INFO][vision] step1 says image is essential, fallback to single-step');
-    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { timeout: timeoutMs });
+    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { ...options, timeout: timeoutMs });
   }
 
   // ===================== Step 2: Text 模型纯文本推理解题 =====================
@@ -548,7 +530,7 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
         messages: step2Messages,
       },
       '[AI OpenAI Vision Step2]',
-      timeoutMs,
+      timeoutMs, options,
     );
 
     const content2 = data2.choices?.[0]?.message?.content || '';
@@ -560,8 +542,10 @@ export async function queryAIVision(imageBase64, textPrompt, aiCfg, options = {}
     }
     return content2;
   } catch (err) {
+    options.guard?.();
+    if (err.name === 'DeadlineError' || err.timeout || err.status) throw err;
     console.warn('[雨课堂助手][WARN][vision-step2] failed, fallback to single-step', err);
-    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { timeout: timeoutMs });
+    return singleStepVisionCall(profile, cleanBase64List, textPrompt, { ...options, timeout: timeoutMs });
   }
 }
 
@@ -579,7 +563,7 @@ export async function queryOCRVision(imageBase64, aiCfg) {
     apiKey: resolvedApiKey,
   };
 
-  const cleanBase64 = String(imageBase64 || '').replace(/^data:image\/[^;]+;base64,/, '').trim();
+  const cleanBase64 = String(imageBase64 || '').trim();
   if (!cleanBase64) {
     throw new Error('OCR 图片内容为空');
   }
@@ -603,7 +587,7 @@ export async function queryOCRVision(imageBase64, aiCfg) {
           content: [
             {
               type: 'image_url',
-              image_url: { url: `data:image/png;base64,${cleanBase64}` },
+              image_url: { url: imageDataUrl(cleanBase64) },
             },
             {
               type: 'text',

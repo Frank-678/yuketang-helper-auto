@@ -1,13 +1,10 @@
-import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-
-const expectedVersion = '1.21.6';
-
-test('release metadata points to the 1.21.6 userscript artifact', async () => {
-  const metadata = await readFile(new URL('../userscript.meta.js', import.meta.url), 'utf8');
-  const rollupConfig = await readFile(new URL('../rollup.config.mjs', import.meta.url), 'utf8');
-
-  assert.match(metadata, new RegExp(`@version\\s+${expectedVersion.replaceAll('.', '\\.')}\\b`));
-  assert.match(rollupConfig, new RegExp(`ykt-helper-${expectedVersion.replaceAll('.', '')}\\.user\\.js`));
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const path = new URL('../', import.meta.url);
+test('published stable and versioned scripts are byte-identical to the current build', () => {
+  const built = fs.readFileSync(new URL('dist/ykt-helper-1220.user.js', path));
+  for (const name of ['ykt-helper.user.js', 'ykt-helper-1220.user.js']) assert.equal(fs.readFileSync(new URL('../release/' + name, path)).equals(built), true, name + ' is stale; run npm run release');
+  assert.match(built.toString('utf8'), /@version\s+1\.22\.0/);
+  assert.match(built.toString('utf8'), /@downloadURL\s+https:\/\/raw\.githubusercontent\.com\/Frank-678\/yuketang-helper-auto\/main\/release\/ykt-helper\.user\.js/);
 });

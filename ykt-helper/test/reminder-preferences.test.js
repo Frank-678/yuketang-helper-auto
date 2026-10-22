@@ -5,8 +5,6 @@ const loadReminderPreferences = () => import('../src/core/reminder-preferences.j
 
 const EVENT_SWITCHES = [
   ['problem-start', 'notifyProblemStarts'],
-  ['danmu-round-start', 'notifyDanmuRoundStarts'],
-  ['danmu-follow-trigger', 'notifyDanmuFollowTriggers'],
   ['assessment-publish', 'notifyAssessmentPublishes'],
   ['courseware-publish', 'notifyCoursewarePublishes'],
   ['other-publish', 'notifyOtherPublishes'],

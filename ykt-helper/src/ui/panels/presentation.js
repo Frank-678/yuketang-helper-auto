@@ -412,8 +412,10 @@ function renderTranslationState() {
   renderSharedResult();
 }
 
-async function recognizeCurrentSlideText(options = {}) {
+async function runRecognizeCurrentSlideText(options = {}) {
   const { silent = false } = options;
+  const context = `${repo.accountId}:${repo.currentLessonId}`;
+  const current = () => context === `${repo.accountId}:${repo.currentLessonId}`;
   const slideId = getCurrentSlideId();
   if (!slideId) {
     if (!silent) ui.toast('请先选择要识别的课件页', 2500);
@@ -432,7 +434,9 @@ async function recognizeCurrentSlideText(options = {}) {
       throw new Error('当前课件页图片读取失败');
     }
 
+    if (!current()) return '';
     const text = await queryOCRVision(imageBase64, ui.config.ai);
+    if (!current()) return '';
     ocrResults.set(slideId, {
       loading: false,
       text: text || '未识别到文字',
@@ -443,6 +447,7 @@ async function recognizeCurrentSlideText(options = {}) {
     if (!silent) ui.toast('文字识别完成', 2000);
     return text || '未识别到文字';
   } catch (e) {
+    if (!current()) return '';
     ocrResults.set(slideId, {
       loading: false,
       text: '',
@@ -455,7 +460,16 @@ async function recognizeCurrentSlideText(options = {}) {
   }
 }
 
+const ocrPending = new Map();
+function recognizeCurrentSlideText(options = {}) {
+  const id = `${repo.accountId}:${repo.currentLessonId}:${getCurrentSlideId()}`;
+  if (ocrPending.has(id)) return ocrPending.get(id);
+  const task = runRecognizeCurrentSlideText(options).finally(() => ocrPending.delete(id));
+  ocrPending.set(id, task); return task;
+}
 async function translateCurrentOCRText() {
+  const context = `${repo.accountId}:${repo.currentLessonId}`;
+  const current = () => context === `${repo.accountId}:${repo.currentLessonId}`;
   const slideId = getCurrentSlideId();
   if (!slideId) {
     ui.toast('请先选择课件页', 2500);
@@ -505,6 +519,7 @@ async function translateCurrentOCRText() {
 
   try {
     const translated = await queryTranslationText(sourceText, targetLanguage, ui.config.ai);
+    if (!current()) return;
     translationResults.set(slideId, {
       loading: false,
       text: translated || '',
@@ -516,6 +531,7 @@ async function translateCurrentOCRText() {
     renderTranslationState();
     ui.toast(`翻译完成：${targetLanguage}`, 2000);
   } catch (e) {
+    if (!current()) return;
     translationResults.set(slideId, {
       loading: false,
       text: '',
@@ -629,12 +645,12 @@ function ensureStaticReportPresentation() {
   const pid = `static:${window.location.pathname}`;
 
   // 如果已经注入过，就不再重复扫描 & 打印日志，直接返回 false
-  if (staticReportReady && repo.presentations.has(pid)) {
-    return false;
-  }
+
 
   const urlsFromDom = collectStaticSlideURLsFromDom();
-  const urls = Array.from(new Set([...urlsFromDom]));
+  const existingSlides = repo.presentations.get(pid)?.slides || [];
+  const urls = Array.from(new Set([...existingSlides.map(s => s.image), ...urlsFromDom]));
+  if (urls.length === existingSlides.length && urls.every(u => existingSlides.some(s => s.image === u))) return false;
 
   if (!urls.length) {
     console.log('[雨课堂助手][DBG][presentation][static-report] 依然没有发现任何 slide URL');
@@ -645,7 +661,7 @@ function ensureStaticReportPresentation() {
   withIndex.sort((a, b) => a.idx - b.idx);
 
   const slides = withIndex.map(({ u, idx }) => {
-    const id = `static-${idx}`;
+    const id = `${pid}:static-${idx}`;
     return { id, index: idx, title: `第 ${idx} 页`, thumbnail: u, image: u, problem: null };
   });
 
@@ -711,7 +727,7 @@ export function mountPresentationPanel() {
       window.dispatchEvent(new CustomEvent('ykt:ask-ai-for-slides', {
         detail: { slides, source: 'manual' }
       }));
-      window.dispatchEvent(new CustomEvent('ykt:open-ai'));
+
       return;
     }
 
@@ -724,7 +740,7 @@ export function mountPresentationPanel() {
     window.dispatchEvent(new CustomEvent('ykt:ask-ai-for-slide', {
       detail: { slideId: sid, imageUrl }
     }));
-    window.dispatchEvent(new CustomEvent('ykt:open-ai'));
+
   });
 
   $('#ykt-download-current')?.addEventListener('click', downloadCurrentSlide);
@@ -751,6 +767,7 @@ export function mountPresentationPanel() {
     updatePresentationList();
   });
 
+  window.addEventListener('ykt:lesson-change', () => { selectedSlideIds.clear(); ocrResults.clear(); translationResults.clear(); currentResultMode = 'original'; });
   mounted = true;
   renderOCRState();
   renderTranslationState();
@@ -780,32 +797,16 @@ export function updatePresentationList() {
     W('[static-report] 检测/注入失败：', e);
   }
 
-  if (!window.__ykt_static_dom_mo) {
-    window.__ykt_static_dom_mo = true;
-    let times = 0;
-
-    const mo = new MutationObserver(() => {
-      if (!isStudentLessonReportPage()) return;
-      if (++times > 20) return; 
-
-      console.log('[雨课堂助手][DBG][presentation][static-report] DOM 变更，尝试重新收集 slide URL (times =', times, ')');
-      const injected = ensureStaticReportPresentation();
-      if (injected) {
-        console.log('[雨课堂助手][DBG][presentation][static-report] DOM 中已找到 slide，停止监听并刷新面板');
-        try { mo.disconnect(); } catch (e) {}
-        updatePresentationList();
-      }
+  if (!window.__ykt_static_dom_mo && isStudentLessonReportPage()) {
+    let timer;
+    const mo = new MutationObserver(records => {
+      if (!isStudentLessonReportPage()) { mo.disconnect(); window.__ykt_static_dom_mo = null; return; }
+      if (records.every(r => r.target?.closest?.('[id^="ykt-"]'))) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (ensureStaticReportPresentation()) updatePresentationList(); }, 250);
     });
-
-    const rootSelector = "#content-page-wrap > div > aside > div.left-panel-scroll > div.left-panel-tab-content > div > section.slides-list";
-    let target = document.querySelector(rootSelector) || document.querySelector('section.slides-list') || document.body;
-
-    console.log('[雨课堂助手][DBG][presentation][static-report] MutationObserver 监听目标：', {
-      useBody: target === document.body,
-      hasSlidesList: target !== document.body
-    });
-
-    mo.observe(target, { childList: true, subtree: true });
+    window.__ykt_static_dom_mo = mo;
+    const doc = getSlidesDocument(); mo.observe(doc.body || document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'data-src'] });
   }
 
   const listEl = document.getElementById('ykt-presentation-list');
@@ -860,10 +861,9 @@ export function updatePresentationList() {
 
     const titleEl = document.createElement('div');
     titleEl.className = 'presentation-title';
-    titleEl.innerHTML = `
-      <span>${presentation.title || `课件 ${id}`}</span>
-      <i class="fas fa-download download-btn" title="下载课件"></i>
-    `;
+    const titleText = document.createElement('span'); titleText.textContent = presentation.title || `课件 ${id}`;
+    const downloadIcon = document.createElement('i'); downloadIcon.className = 'fas fa-download download-btn'; downloadIcon.title = '下载课件';
+    titleEl.append(titleText, downloadIcon);
     cont.appendChild(titleEl);
 
     titleEl.querySelector('.download-btn')?.addEventListener('click', (e) => {
@@ -1050,38 +1050,6 @@ export function updateSlideView() {
       });
       box.appendChild(opts);
     }
-
-    const problemActions = document.createElement('div');
-    problemActions.className = 'problem-actions';
-    const forceAI = document.createElement('button');
-    forceAI.type = 'button';
-    forceAI.textContent = 'AI 强制作答';
-    forceAI.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      const status = repo.problemStatus.get(String(prob.problemId)) || repo.problemStatus.get(prob.problemId);
-      const endTime = Number(status?.endTime ?? prob.endTime);
-      const expired = Number.isFinite(endTime) && Date.now() >= endTime;
-      if (expired && !window.confirm('这道题已过截止时间，AI 将使用强制补交接口。继续吗？')) return;
-      forceAI.disabled = true;
-      try {
-        const result = await actions.forceAIAnswer(prob.problemId, { forceRetry: expired });
-        if (!result?.ok) ui.toast(`AI 强制作答未完成：${result?.error?.message || result?.reason || '未知原因'}`, 4000);
-      } finally {
-        forceAI.disabled = false;
-        updateSlideView();
-      }
-    });
-    problemActions.appendChild(forceAI);
-
-    const editAnswer = document.createElement('button');
-    editAnswer.type = 'button';
-    editAnswer.textContent = '编辑/补交';
-    editAnswer.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      window.dispatchEvent(new CustomEvent('ykt:open-problem-list', { detail: { problemId: prob.problemId } }));
-    });
-    problemActions.appendChild(editAnswer);
-    box.appendChild(problemActions);
     problemView.appendChild(box);
   }
 
@@ -1123,7 +1091,8 @@ async function downloadPresentationPDF() {
   }
 
   const showAll = !!ui.config.showAllSlides;
-  const slides = pres.slides.filter(s => showAll || s.problem);
+  const selected = selectedSlideIds.size ? pres.slides.filter(s => selectedSlideIds.has(String(s.id))) : pres.slides;
+  const slides = selected;
   if (slides.length === 0) return ui.toast('当前筛选下没有可导出的页面');
 
   try {
@@ -1140,30 +1109,32 @@ async function downloadPresentationPDF() {
     const loadImage = (src) => new Promise((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload = () => resolve(img);
-      img.onerror = reject;
+      const timer = setTimeout(() => reject(new Error('页面图片加载超时')), 12000);
+      img.onload = () => { clearTimeout(timer); resolve(img); };
+      img.onerror = () => { clearTimeout(timer); reject(new Error('页面图片读取失败')); };
       img.src = src;
     });
 
+    let exported = 0;
+    const failed = [];
     for (let i = 0; i < slides.length; i++) {
-      const s = slides[i];
-      const url = getSlideImageUrl(s);
-      if (!url) {
-        if (i > 0) doc.addPage();
-        continue;
-      }
-      const img = await loadImage(url);
-      const iw = img.naturalWidth || img.width;
-      const ih = img.naturalHeight || img.height;
-      const r = Math.min(maxW / iw, maxH / ih);
-      const w = Math.floor(iw * r);
-      const h = Math.floor(ih * r);
-      const x = Math.floor((pageW - w) / 2);
-      const y = Math.floor((pageH - h) / 2);
-
-      if (i > 0) doc.addPage();
-      doc.addImage(img, 'PNG', x, y, w, h);
+      const slide = slides[i];
+      try {
+        const url = getSlideImageUrl(slide); if (!url) throw new Error('无图片');
+        const img = await loadImage(url);
+        const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+        if (!iw || !ih) throw new Error('图片尺寸无效');
+        const ratio = Math.min(maxW / iw, maxH / ih), width = iw * ratio, height = ih * ratio;
+        const canvas = document.createElement('canvas'); canvas.width = iw; canvas.height = ih;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        const data = canvas.toDataURL('image/png');
+        if (exported > 0) doc.addPage();
+        doc.addImage(data, 'PNG', (pageW - width) / 2, (pageH - height) / 2, width, height);
+        exported++;
+      } catch (error) { failed.push(slide.index ?? i + 1); }
     }
+    if (!exported) throw new Error('所有页面图片读取失败，请检查跨域访问后重试');
+    if (failed.length) ui.toast(`已导出 ${exported} 页；第 ${failed.join('、')} 页失败，可选中这些页后重试`, 6000);
 
     const name = (pres.title || `课件-${pid}`).replace(/[\\/:*?"<>|]/g, '_');
     doc.save(`${name}.pdf`);

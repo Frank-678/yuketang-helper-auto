@@ -1,202 +1,112 @@
 import { ui } from '../ui/ui-api.js';
 import { repo } from '../state/repo.js';
 import { diag } from '../core/diagnostics.js';
+import { hasSubmittedAnswer, sameAnswer, validateAnswer } from '../core/answer-state.js';
 
-function sleep(ms) { return new Promise(r => setTimeout(r, Math.max(0, ms|0))); }
-function calcAutoWaitMs() {
-  const base = Math.max(0, (ui?.config?.autoAnswerDelay ?? 0));
-  const rand = Math.max(0, (ui?.config?.autoAnswerRandomDelay ?? 0));
-  return base + (rand ? Math.floor(Math.random() * rand) : 0);
+export class SubmissionError extends Error {
+  constructor(message, { code = null, unknown = false, status = null } = {}) { super(message); this.name = 'SubmissionError'; this.code = code; this.unknown = unknown; this.status = status; }
 }
-function shouldAutoAnswerForLesson_(lessonId) {
-  if (ui?.config?.autoAnswer) return true;
-  if (!lessonId) return false;
-  if (repo?.autoJoinedLessons?.has(lessonId) && ui?.config?.autoAnswerOnAutoJoin) return true;
-  if (repo?.forceAutoAnswerLessons?.has(lessonId)) return true;
-  return false;
-}
-
-
-const DEFAULT_HEADERS = () => ({
-  'Content-Type': 'application/json',
-  'xtbz': 'ykt',
-  'X-Client': 'h5',
-  'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? localStorage.getItem('Authorization') : ''),
-});
-
-/**
- * Low-level POST helper using XMLHttpRequest to align with site requirements.
- * @param {string} url
- * @param {object} data
- * @param {Record<string,string>} headers
- * @returns {Promise<any>}
- */
-function xhrPost(url, data, headers) {
+function headers() { return { 'Content-Type': 'application/json', xtbz: 'ykt', 'X-Client': 'h5', Authorization: 'Bearer ' + (globalThis.localStorage?.getItem('Authorization') || '') }; }
+function post(url, payload, options = {}) {
   return new Promise((resolve, reject) => {
-    try {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', url);
-      for (const [k, v] of Object.entries(headers || {})) xhr.setRequestHeader(k, v);
-      xhr.onload = () => {
-        try {
-          const resp = JSON.parse(xhr.responseText);
-          if (resp && typeof resp === 'object') {
-            resolve(resp);
-          } else {
-            reject(new Error('解析响应失败'));
-          }
-        } catch {
-          reject(new Error('解析响应失败'));
-        }
-      };
-      xhr.onerror = () => reject(new Error('网络请求失败'));
-      xhr.send(JSON.stringify(data));
-    } catch (e) {
-      reject(e);
-    }
+    const xhr = new XMLHttpRequest();
+    xhr.__yktOwnSubmission = true;
+    xhr.open('POST', url, true);
+    xhr.timeout = options.timeout ?? 20000;
+    for (const [k, v] of Object.entries({ ...headers(), ...options.headers })) xhr.setRequestHeader(k, v);
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) return reject(new SubmissionError(`提交 HTTP ${xhr.status}`, { status: xhr.status, unknown: xhr.status >= 500 }));
+      let data;
+      try { data = typeof xhr.response === 'object' && xhr.response !== null ? xhr.response : JSON.parse(xhr.responseText); }
+      catch { return reject(new SubmissionError('提交响应无法解析，需核实服务器答案', { unknown: true })); }
+      if (!data || typeof data !== 'object' || data.code === undefined) return reject(new SubmissionError('服务器未返回明确结果', { unknown: true }));
+      if (Number(data.code) !== 0) return reject(new SubmissionError(`${data.msg || data.message || '提交失败'} (${data.code})`, { code: Number(data.code) }));
+      resolve(data);
+    };
+    xhr.onerror = () => reject(new SubmissionError('提交网络中断，结果待核实', { unknown: true }));
+    xhr.ontimeout = () => reject(new SubmissionError('提交超时，结果待核实', { unknown: true }));
+    xhr.onabort = () => reject(new SubmissionError('提交已中断，结果待核实', { unknown: true }));
+    if (options.signal?.aborted) return reject(new Error('操作已取消'));
+    const abort = () => xhr.abort();
+    options.signal?.addEventListener('abort', abort, { once: true });
+    xhr.addEventListener?.('loadend', () => options.signal?.removeEventListener('abort', abort), { once: true });
+    try { options.guard?.(); xhr.send(JSON.stringify(payload)); } catch (error) { reject(error); }
   });
 }
-
-/**
- * POST /api/v3/lesson/problem/answer
- * Mirrors the 1.16.1 logic (no UI). Returns {code, data, msg, ...} on success code===0.
- * @param {{problemId:number, problemType:number}} problem
- * @param {any} result
- * @param {{headers?:Record<string,string>, dt?:number}} [options]
- */
 export async function answerProblem(problem, result, options = {}) {
-  const url = '/api/v3/lesson/problem/answer';
-  const headers = { ...DEFAULT_HEADERS(), ...(options.headers || {}) };
-  const payload = {
-    problemId: problem.problemId,
-    problemType: problem.problemType,
-    dt: options.dt ?? Date.now(),
-    result,
-  };
-
-  const resp = await xhrPost(url, payload, headers);
-  diag('submit-answer', { problemId: problem.problemId, code: resp.code, msg: resp.msg });
-  if (resp.code === 0) return resp;
-  throw new Error(`${resp.msg} (${resp.code})`);
+  return post('/api/v3/lesson/problem/answer', { problemId: String(problem.problemId), problemType: Number(problem.problemType), dt: options.dt ?? Date.now(), result }, options);
 }
-
-/**
- * POST /api/v3/lesson/problem/retry
- * Expects server to echo success ids in data.success (as in v1.16.1).
- * @param {{problemId:number, problemType:number}} problem
- * @param {any} result
- * @param {number} dt - simulated answer time (epoch ms)
- * @param {{headers?:Record<string,string>}} [options]
- */
 export async function retryAnswer(problem, result, dt, options = {}) {
-  const url = '/api/v3/lesson/problem/retry';
-  const headers = { ...DEFAULT_HEADERS(), ...(options.headers || {}) };
-  const payload = {
-    problems: [{
-      problemId: problem.problemId,
-      problemType: problem.problemType,
-      dt,
-      result,
-    }],
-  };
-
-  const resp = await xhrPost(url, payload, headers);
-  diag('submit-retry', { problemId: problem.problemId, code: resp.code, msg: resp.msg, success: resp?.data?.success });
-  if (resp.code !== 0) {
-    throw new Error(`${resp.msg} (${resp.code})`);
-  }
-  const okList = resp?.data?.success || [];
-  if (!Array.isArray(okList) || !okList.includes(problem.problemId)) {
-    throw new Error('服务器未返回成功信息');
-  }
+  const resp = await post('/api/v3/lesson/problem/retry', { problems: [{ problemId: String(problem.problemId), problemType: Number(problem.problemType), dt, result }] }, options);
+  if (!Array.isArray(resp?.data?.success) || !resp.data.success.some(id => String(id?.problemId ?? id?.id ?? id) === String(problem.problemId))) throw new SubmissionError('服务器未确认此题补交成功');
   return resp;
 }
-
-/**
- * High-level orchestrator: answer first; if deadline has passed, optionally retry.
- * This is the module adaptation of the 1.16.1 userscript submit flow.
- *
- * @param {{problemId:number, problemType:number}} problem
- * @param {any} result
- * @param {Object} submitOptions
- * @param {number} [submitOptions.startTime] - unlock time (epoch ms). Required for retry path.
- * @param {number} [submitOptions.endTime]   - deadline (epoch ms). If now >= endTime -> retry path.
- * @param {boolean} [submitOptions.forceRetry=false] - when past deadline, directly use retry without prompting.
- * @param {number} [submitOptions.retryDtOffsetMs=2000] - dt = startTime + offset when retrying.
- * @param {Record<string,string>} [submitOptions.headers] - extra/override headers.
- * @returns {Promise<{'route':'answer'|'retry', resp:any}>}
- * @param {number|string} [submitOptions.lessonId] - 所属课堂；缺省时将使用 repo.currentLessonId
- * @param {boolean} [submitOptions.autoGate=true]  - 是否启用“自动进入课堂/默认自动答题”的判定（向后兼容，默认开启）
- * @param {number} [submitOptions.waitMs]          - 覆盖自动等待时间；未提供时按设置计算
- */
-export async function submitAnswer(problem, result, submitOptions = {}) {
-  const startTime = submitOptions?.startTime;
-  const endTime = submitOptions?.endTime;
-  const forceRetry = submitOptions?.forceRetry ?? false;
-  const retryDtOffsetMs = submitOptions?.retryDtOffsetMs ?? 2000;
-  const headers = submitOptions?.headers;
-  const autoGate = submitOptions?.autoGate ?? true;
-  const waitMs = submitOptions?.waitMs;
-  const lessonIdFromOpts = submitOptions && 'lessonId' in submitOptions ? submitOptions.lessonId : undefined;
-
-   // 统一拿 lessonId
-   const lessonId = (lessonIdFromOpts ?? repo?.currentLessonId ?? null);
-  if (autoGate && shouldAutoAnswerForLesson_(lessonId)) {
-    const ms = typeof waitMs === 'number' ? Math.max(0, waitMs) : calcAutoWaitMs();
-    if (ms > 0) {
-      const guard = (typeof endTime === 'number') ? Math.max(0, endTime - Date.now() - 80) : ms;
-      await sleep(Math.min(ms, guard));
+export async function withAnswerLease(problem, lessonId, task) {
+  return withLease(`${location.origin}:${repo.accountId}:${lessonId}:${problem.problemId}`, task);
+}
+const localLocks = new Set();
+async function withLease(key, task) {
+  if (localLocks.has(key)) throw new Error('此题已有提交任务');
+  localLocks.add(key);
+  try {
+    if (globalThis.navigator?.locks?.request) return await navigator.locks.request(key, { ifAvailable: true }, lock => { if (!lock) throw new Error('另一标签页正在处理此题'); return task(); });
+    const token = `${Date.now()}-${Math.random()}`, leaseKey = `ykt-helper:lease:${key}`;
+    const read = () => { try { return JSON.parse(localStorage.getItem(leaseKey)); } catch { return null; } };
+    const prior = read(); if (prior && prior.until > Date.now()) throw new Error('另一标签页正在处理此题');
+    try { localStorage.setItem(leaseKey, JSON.stringify({ token, until: Date.now() + 60000 })); }
+    catch { throw new Error('无法建立跨标签页提交锁，请释放存储空间'); }
+    await new Promise(resolve => setTimeout(resolve, 0));
+    if (read()?.token !== token) throw new Error('另一标签页已接管此题');
+    const timer = setInterval(() => { if (read()?.token === token) { try { localStorage.setItem(leaseKey, JSON.stringify({ token, until: Date.now() + 60000 })); } catch {} } }, 20000);
+    try { return await task(); } finally { clearInterval(timer); if (read()?.token === token) localStorage.removeItem(leaseKey); }
+  } finally { localLocks.delete(key); }
+}
+export async function submitAnswer(problem, answer, options = {}) {
+  const lessonId = String(options.lessonId ?? problem.lessonId ?? repo.currentLessonId ?? '');
+  const accountId = repo.accountId;
+  const ctx = repo.forLesson(lessonId);
+  const p = ctx.problems.get(problem.problemId) || problem;
+  const result = validateAnswer(p, answer);
+  const state = ctx.problemStatus.get(problem.problemId) || {};
+  const mode = options.forceRetry ? 'retry' : (options.policy || ui.config.submissionPolicy || 'auto');
+  p.pendingAnswer = result; p.updatedAt = Date.now();
+  if (mode === 'local') { repo.persistWork(lessonId); return { route: 'local', result }; }
+  const operation = async () => {
+    const guard = () => { if (repo.accountId !== accountId) throw new Error('账号已变化，提交已停止'); options.guard?.(); };
+    guard();
+    if (state.needsReconciliation && !options.forceRetry) throw new SubmissionError('上次提交结果未知，请先核实并同步服务器答案', { unknown: true });
+    if (!options.allowResubmit && hasSubmittedAnswer(p.result)) {
+      if (sameAnswer(p, p.result, result)) return { route: 'already-confirmed', result };
+      if (mode !== 'retry') throw new SubmissionError('服务器已有另一份答案，请明确选择强制补交修改', { code: 50028 });
     }
-  }
-
-  const now = Date.now();
-  const pastDeadline = typeof endTime === 'number' && now >= endTime;
-  const route = chooseAnswerRoute({ now, endTime, forceRetry });
-
-  if (route === 'retry') {
-
-    console.group('[雨课堂助手][DEBUG][answer] >>> 进入补交分支判断');
-    console.log('problemId:', problem.problemId);
-    console.log('pastDeadline:', pastDeadline, '(now=', now, ', endTime=', endTime, ')');
-    console.log('forceRetry:', forceRetry);
-    console.log('传入 startTime:', startTime, '传入 endTime:', endTime);
-
-    const ps = repo?.problemStatus?.get?.(problem.problemId);
-    console.log('从 repo.problemStatus 获取:', ps);
-
-    const st = Number.isFinite(startTime) ? startTime : (ps?.startTime);
-    const et = Number.isFinite(endTime)   ? endTime   : (ps?.endTime);
-    console.log('最终用于 retry 的 st=', st, ' et=', et);
-
-    // 计算 dt
-    const off  = Math.max(0, retryDtOffsetMs);
-    let dt;
-
-    if (Number.isFinite(st)) {
-      dt = st + off;
-      console.log('补交 dt = startTime + offset =', dt);
-    } else if (Number.isFinite(et)) {
-      dt = Math.max(0, et - Math.max(off, 5000));
-      console.log('补交 dt = near endTime window =', dt);
-    } else {
-      dt = Date.now() - off;
-      console.log('补交 dt = fallback =', dt);
-    }
-
-    console.log('>>> 即将调用 retryAnswer()');
-    console.groupEnd();
-
+    const start = Number(options.startTime ?? state.startTime);
+    const rawEnd = Object.hasOwn(state, 'endTime') ? state.endTime : options.endTime;
+    const end = rawEnd == null || rawEnd === '' ? null : Number(rawEnd);
+    const closed = state.finished === true || (Number.isFinite(end) && Date.now() >= end);
+    if (closed && mode === 'normal') { const e = new SubmissionError('题目已结束，答案已保留在本地'); e.name = 'DeadlineError'; throw e; }
+    let route = mode === 'retry' || closed ? 'retry' : 'answer';
+    state.phase = 'submitting'; ctx.problemStatus.set(problem.problemId, state); repo.persistWork(lessonId);
+    const perform = async () => {
+      guard();
+      const dt = Number.isFinite(start) && start > 0 ? Math.min(start + 2000, Number.isFinite(end) ? end - 1 : start + 2000) : Number.isFinite(end) ? end - 1000 : Date.now() - 2000;
+      return route === 'retry' ? retryAnswer(p, result, dt, { ...options, guard }) : answerProblem(p, result, { ...options, guard });
+    };
     try {
-      const resp = await retryAnswer(problem, result, dt, { headers });
-      console.log('[雨课堂助手][INFO][answer] 补交成功 (/retry)', { problemId: problem.problemId, dt, pastDeadline, forceRetry });
-      return { route: 'retry', resp };
-    } catch (e) {
-      console.error('[雨课堂助手][ERR][answer] 补交失败 (/retry)：', e);
-      console.error('[雨课堂助手][ERR][answer] 失败参数：', { st, et, dt, pastDeadline, forceRetry });
-      throw e;
+      let resp;
+      try { resp = await perform(); }
+      catch (error) {
+        if (error.code !== 50026 || mode !== 'auto' || route === 'retry') throw error;
+        state.finished = true; route = 'retry'; resp = await perform();
+      }
+      p.result = result; p.remoteAnswer = result; p.updatedAt = Date.now();
+      Object.assign(state, { done: true, phase: 'confirmed', needsReconciliation: false, lastError: '', submissionRoute: route });
+      repo.persistWork(lessonId);
+      diag('submit-confirmed', { lessonId, problemId: p.problemId, route });
+      return { route, resp, result };
+    } catch (error) {
+      state.phase = error.unknown || error.code === 50028 ? 'unknown' : 'failed'; state.needsReconciliation = state.phase === 'unknown'; state.lastError = error.message;
+      repo.persistWork(lessonId); throw error;
     }
-  }
-
-  const resp = await answerProblem(problem, result, { headers, dt: now });
-  return { route: 'answer', resp };
+  };
+  return options.leaseHeld ? operation() : withLease(`${location.origin}:${accountId}:${lessonId}:${problem.problemId}`, operation);
 }

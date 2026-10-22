@@ -3,447 +3,78 @@ import { ui } from '../ui-api.js';
 import { repo } from '../../state/repo.js';
 import { actions } from '../../state/actions.js';
 import { submitAnswer } from '../../tsm/answer.js';
-
-const L = (...a) => console.log('[雨课堂助手][DBG][problem-list]', ...a);
-const W = (...a) => console.warn('[雨课堂助手][WARN][problem-list]', ...a);
-
-function $(sel) { return document.querySelector(sel); }
-function create(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
-function pretty(obj){ try{ return JSON.stringify(obj, null, 2); }catch{ return String(obj); } }
-
-const HEADERS = () => ({
-  'Content-Type': 'application/json',
-  'xtbz': 'ykt',
-  'X-Client': 'h5',
-  'Authorization': 'Bearer ' + (typeof localStorage!=='undefined' ? (localStorage.getItem('Authorization')||'') : '')
-});
-
-async function httpGet(url){
-  return new Promise((resolve,reject)=>{
-    try{
-      const xhr=new XMLHttpRequest();
-      xhr.open('GET', url, true);
-      const h=HEADERS(); for(const k in h) xhr.setRequestHeader(k,h[k]);
-      xhr.onload=()=>{ try{ resolve(JSON.parse(xhr.responseText)); }catch{ reject(new Error('解析响应失败')); } };
-      xhr.onerror=()=>reject(new Error('网络失败'));
-      xhr.send();
-    }catch(e){ reject(e); }
-  });
-}
-
-// 依次尝试多个端点，先成功先用
-async function fetchProblemDetail(problemId){
-  const candidates = [
-    `/api/v3/lesson/problem/detail?problemId=${problemId}`,
-    `/api/v3/lesson/problem/get?problemId=${problemId}`,
-    `/mooc-api/v1/lms/problem/detail?problem_id=${problemId}`,
-  ];
-  for (const url of candidates){
-    try{
-      const resp = await httpGet(url);
-      if (resp && typeof resp === 'object' && (resp.code === 0 || resp.success === true)){
-        return resp;
-      }
-    }catch(_){ /* try next */ }
-  }
-  throw new Error('无法获取题目信息');
-}
-
-/**
- * 将所有可见课件中的题目页灌入 repo.problems / repo.encounteredProblems
- * 目的：绕过 XHR/fetch 拦截失效，直接从现有内存结构构建题目列表
- */
-function hydrateProblemsFromPresentations() {
-  try {
-    const beforeCnt = repo.problems?.size || 0;
-    const encBefore = (repo.encounteredProblems || []).length;
-    const seen = new Set((repo.encounteredProblems || []).map(e => e.problemId));
-
-    let foundSlides = 0, filledProblems = 0, addedEvents = 0;
-
-    for (const [, pres] of repo.presentations) {
-      const slides = pres?.slides || [];
-      if (!slides.length) continue;
-      for (const s of slides) {
-        if (!s || !s.problem) continue;
-        foundSlides++;
-        const pid = s.problem.problemId || s.problem.id;
-        if (!pid) continue;
-        const pidStr = String(pid);
-
-        // 填充 repo.problems
-        if (!repo.problems.has(pidStr)) {
-          const normalized = {
-            problemId: pidStr,
-            problemType: s.problem.problemType || s.problem.type || s.problem.questionType || 'unknown',
-            body: s.problem.body || s.problem.title || '',
-            options: s.problem.options || [],
-            result: s.problem.result || null,
-            status: s.problem.status || {},
-            startTime: s.problem.startTime,
-            endTime: s.problem.endTime,
-            slideId: String(s.id),
-            presentationId: String(pres.id),
-          };
-          repo.problems.set(pidStr, Object.assign({}, s.problem, normalized));
-          filledProblems++;
-        }
-
-        // 填充 repo.encounteredProblems
-        if (!seen.has(pidStr)) {
-          seen.add(pidStr);
-          (repo.encounteredProblems || (repo.encounteredProblems = [])).push({
-            problemId: pidStr,
-            problemType: s.problem.problemType || s.problem.type || s.problem.questionType || 'unknown',
-            body: s.problem.body || s.problem.title || '',
-            presentationId: String(pres.id),
-            slideId: String(s.id),
-            slide: s,
-            endTime: s.problem.endTime,
-            startTime: s.problem.startTime,
-          });
-          addedEvents++;
-        }
-      }
-    }
-
-    // 按 presentationId+slide.index 排序
-    if (repo.encounteredProblems && repo.encounteredProblems.length) {
-      repo.encounteredProblems.sort((a,b)=>{
-        if (a.presentationId !== b.presentationId) return String(a.presentationId).localeCompare(String(b.presentationId));
-        const ax = a.slide?.index ?? 0, bx = b.slide?.index ?? 0;
-        return ax - bx;
-      });
-    }
-
-    const afterCnt = repo.problems?.size || 0;
-    const encAfter = (repo.encounteredProblems || []).length;
-    L('[hydrateProblemsFromPresentations]', {
-      foundSlides, filledProblems, addedEvents,
-      problemsBefore: beforeCnt, problemsAfter: afterCnt,
-      encounteredBefore: encBefore, encounteredAfter: encAfter,
-      sampleProblems: Array.from(repo.problems.keys()).slice(0,8),
-    });
-  } catch (e) {
-    W('hydrateProblemsFromPresentations error:', e);
-  }
-}
-
-/**
- * 在无法从 repo.problems 命中时，跨 presentations 查找并回写
- */
-function crossFindProblem(problemIdStr) {
-  for (const [, pres] of repo.presentations) {
-    const arr = pres?.slides || [];
-    for (const s of arr) {
-      const pid = s?.problem?.problemId || s?.problem?.id;
-      if (pid && String(pid) === problemIdStr) {
-        // 回写
-        const normalized = Object.assign({},
-          s.problem,
-          {
-            problemId: problemIdStr,
-            problemType: s.problem.problemType || s.problem.type || s.problem.questionType || 'unknown',
-            body: s.problem.body || s.problem.title || '',
-            options: s.problem.options || [],
-            result: s.problem.result || null,
-            status: s.problem.status || {},
-            startTime: s.problem.startTime,
-            endTime: s.problem.endTime,
-            slideId: String(s.id),
-            presentationId: String(pres.id),
-          }
-        );
-        repo.problems.set(problemIdStr, normalized);
-        return { problem: normalized, slide: s, presentationId: String(pres.id) };
-      }
-    }
-  }
-  return null;
-}
-
-// ========== 行渲染与交互 ==========
-function bindRowActions(row, e, prob){
-  const actionsBar = row.querySelector('.problem-actions');
-
-  // 查看：跳到对应的课件页
-  const btnGo = create('button'); btnGo.textContent = '查看';
-  btnGo.onclick = () => {
-    const presId = e.presentationId || prob?.presentationId;
-    const slideId = (e.slide?.id || e.slideId || prob?.slideId);
-    L('查看题目 -> navigateTo', { presId, slideId });
-    if (presId && slideId) actions.navigateTo(String(presId), String(slideId));
-    else ui.toast('缺少跳转信息');
-  };
-  actionsBar.appendChild(btnGo);
-
-  // AI 解答：打开 AI 面板并优先使用该题所在页（若拿得到）
-  const btnAI = create('button'); btnAI.textContent = 'AI解答';
-  btnAI.onclick = () => {
-    const presId = e.presentationId || prob?.presentationId;
-    const slideId = (e.slide?.id || e.slideId || prob?.slideId);
-    if (slideId) {
-      // 派发“提问当前PPT”以便 AI 面板优先识别该页
-      window.dispatchEvent(new CustomEvent('ykt:ask-ai-for-slide', {
-        detail: {
-          slideId: String(slideId),
-          imageUrl: repo.slides.get(String(slideId))?.image || repo.slides.get(String(slideId))?.thumbnail || ''
-        }
-      }));
-    }
-    window.dispatchEvent(new CustomEvent('ykt:open-ai', { detail:{ problemId: e.problemId } }));
-  };
-  actionsBar.appendChild(btnAI);
-
-  // AI 强制作答：直接分析并提交；过期题目需要二次确认后走补交接口
-  const btnForceAI = create('button'); btnForceAI.textContent = 'AI强制作答';
-  btnForceAI.onclick = async () => {
-    const ps = repo.problemStatus?.get?.(e.problemId);
-    const end = Number(ps?.endTime ?? e.endTime ?? prob?.endTime);
-    const expired = Number.isFinite(end) && Date.now() >= end;
-    if (expired && !window.confirm('这道题已过截止时间，AI 将使用强制补交接口。继续吗？')) return;
-
-    row.classList.add('loading');
-    btnForceAI.disabled = true;
-    try {
-      const result = await actions.forceAIAnswer(e.problemId, { forceRetry: expired });
-      if (!result?.ok) ui.toast(`AI 强制作答未完成：${result?.error?.message || result?.reason || '未知原因'}`, 4000);
-      else ui.toast(expired ? 'AI 作答完成并已补交' : 'AI 作答完成');
-      updateProblemList();
-    } catch (error) {
-      ui.toast(`AI 强制作答失败：${error?.message || error}`, 4000);
-    } finally {
-      btnForceAI.disabled = false;
-      row.classList.remove('loading');
-    }
-  };
-  actionsBar.appendChild(btnForceAI);
-
-  // 修改后刷新题目
-  const btnRefresh = create('button'); btnRefresh.textContent = '刷新题目';
-  btnRefresh.onclick = async () => {
-    row.classList.add('loading');
-    try{
-      const resp = await fetchProblemDetail(e.problemId);
-      const detail = resp.data?.problem || resp.data || resp.result || {};
-      const merged = Object.assign({}, prob||{}, detail, { problemId: e.problemId, problemType: e.problemType });
-      repo.problems.set(e.problemId, merged);
-      updateRow(row, e, merged);
-      ui.toast('已刷新题目');
-    }catch(err){
-      ui.toast('刷新失败：' + (err?.message || err));
-    }finally{
-      row.classList.remove('loading');
-    }
-  };
-  actionsBar.appendChild(btnRefresh);
-}
-
-function updateRow(row, e, prob){
-   // 标题
-  const title = row.querySelector('.problem-title');
-  title.textContent = (prob?.body || e.body || prob?.title || `题目 ${e.problemId}`).slice(0, 120);
-
-  // 先拿 status & 时窗
-  const status = prob?.status || e.status || {};
-  const ps = repo.problemStatus?.get?.(e.problemId);
-  const startTime = Number(
-    status?.startTime ?? prob?.startTime ?? e.startTime ?? ps?.startTime ?? 0
-  ) || undefined;
-  const endTime = Number(
-    status?.endTime   ?? prob?.endTime   ?? e.endTime   ?? ps?.endTime   ?? 0
-  ) || undefined;
-
-  // 元信息（含截止时间）
-  const meta = row.querySelector('.problem-meta');
-  const answered = !!(prob?.result || status?.myAnswer || status?.answered);
-  meta.textContent =
-    `PID: ${e.problemId} / 类型: ${e.problemType} / 状态: ${answered ? '已作答' : '未作答'} / 截止: ${endTime ? new Date(endTime).toLocaleString() : '未知'}`;
-
-  // 容器
-  let detail = row.querySelector('.problem-detail');
-  if (!detail){ detail = create('div','problem-detail'); row.appendChild(detail); }
-  detail.innerHTML = '';
-
-  // 已作答答案
-  const answeredBox = create('div','answered-box');
-  const ansLabel = create('div','label'); ansLabel.textContent = '已作答答案';
-  const ansPre = create('pre'); ansPre.textContent = pretty(prob?.result || status?.myAnswer || {});
-  answeredBox.appendChild(ansLabel); answeredBox.appendChild(ansPre);
-  detail.appendChild(answeredBox);
-
-  // 手动答题（含补交）
-  const editorBox = create('div','editor-box');
-  const editLabel = create('div','label'); editLabel.textContent = '手动答题（JSON）';
-  const textarea = create('textarea'); textarea.rows = 6; textarea.placeholder='{"answers":[...]}';
-  textarea.value = pretty(prob?.result || status?.myAnswer || prob?.suggested || {});
-  editorBox.appendChild(editLabel); editorBox.appendChild(textarea);
-
-  const submitBar = create('div','submit-bar');
-
-  // 保存（仅本地）
-  const btnSaveLocal = create('button'); btnSaveLocal.textContent = '保存(本地)';
-  btnSaveLocal.onclick = () => {
-    try{
-      const parsed = JSON.parse(textarea.value || '[""]');
-      const merged = Object.assign({}, prob||{}, { result: parsed });
-      repo.problems.set(e.problemId, merged);
-      ui.toast('已保存到本地列表');
-      updateRow(row, e, merged);
-    }catch(err){ ui.toast('JSON 解析失败：' + (err?.message || err)); }
-  };
-  submitBar.appendChild(btnSaveLocal);
-
-  // 正常提交（过期则提示是否补交）
-  const btnSubmit = create('button'); btnSubmit.textContent = '提交';
-  btnSubmit.onclick = async () => {
-    try{
-      const result = JSON.parse(textarea.value || '[""]');
-      row.classList.add('loading');
-      const { route } = await submitAnswer(
-        { problemId: e.problemId, problemType: e.problemType },
-        result,
-        { startTime, endTime, autoGate: false, waitMs: 0 }
-      );
-      ui.toast(route==='answer' ? '提交成功' : '补交成功');
-      const merged = Object.assign({}, prob||{}, { result }, { status: { ...(prob?.status||{}), answered: true } });
-      repo.problems.set(e.problemId, merged);
-      updateRow(row, e, merged);
-    }catch(err){
-      if (err?.name === 'DeadlineError'){
-        ui.confirm('已过截止，是否执行补交？').then(async ok => {
-          if (!ok) return;
-          try{
-            const result = JSON.parse(textarea.value || '{}');
-            row.classList.add('loading');
-            await submitAnswer(
-              { problemId: e.problemId, problemType: e.problemType },
-              result,
-              { startTime, endTime, forceRetry: true, autoGate: false, waitMs: 0 }
-            );
-            ui.toast('补交成功');
-            const merged = Object.assign({}, prob||{}, { result }, { status: { ...(prob?.status||{}), answered: true } });
-            repo.problems.set(e.problemId, merged);
-            updateRow(row, e, merged);
-          }catch(e2){ ui.toast('补交失败：' + (e2?.message||e2)); }
-          finally{ row.classList.remove('loading'); }
-        });
-      }else{
-        ui.toast('提交失败：' + (err?.message || err));
-      }
-    }finally{
-      row.classList.remove('loading');
-    }
-  };
-  submitBar.appendChild(btnSubmit);
-
-  // 强制补交
-  const btnForceRetry = create('button'); btnForceRetry.textContent = '强制补交';
-  btnForceRetry.onclick = async () => {
-    try{
-      const result = JSON.parse(textarea.value || '{}');
-      row.classList.add('loading');
-      await submitAnswer(
-        { problemId: e.problemId, problemType: e.problemType },
-        result,
-        { startTime, endTime, forceRetry: true, autoGate: false, waitMs: 0 }
-      );
-      ui.toast('补交成功');
-      const merged = Object.assign({}, prob||{}, { result }, { status: { ...(prob?.status||{}), answered: true } });
-      repo.problems.set(e.problemId, merged);
-      updateRow(row, e, merged);
-    }catch(err){ ui.toast('补交失败：' + (err?.message || err)); }
-    finally{ row.classList.remove('loading'); }
-  };
-  submitBar.appendChild(btnForceRetry);
-
-  editorBox.appendChild(submitBar);
-  detail.appendChild(editorBox);
-}
-
-// ========== 面板生命周期 ==========
-let mounted = false;
-let root;
-
+import { hasSubmittedAnswer, validateAnswer } from '../../core/answer-state.js';
+let root, mounted = false, viewKey = '';
+const rows = new Map();
+const create = (tag, text, className) => { const el = document.createElement(tag); if (text != null) el.textContent = text; if (className) el.className = className; return el; };
 export function mountProblemListPanel() {
   if (mounted) return root;
-  const wrap = document.createElement('div');
-  wrap.innerHTML = tpl;
-  document.body.appendChild(wrap.firstElementChild);
-  root = document.getElementById('ykt-problem-list-panel');
-
-  $('#ykt-problem-list-close')?.addEventListener('click', () => showProblemListPanel(false));
+  const wrapper = create('div'); wrapper.innerHTML = tpl; document.body.appendChild(wrapper.firstElementChild);
+  root = document.getElementById('ykt-problem-list-panel'); mounted = true;
+  document.getElementById('ykt-problem-list-close')?.addEventListener('click', () => showProblemListPanel(false));
   window.addEventListener('ykt:open-problem-list', () => showProblemListPanel(true));
-
-  mounted = true;
-
-  // 首次挂载时就做一次灌入
-  hydrateProblemsFromPresentations();
-  updateProblemList();
   return root;
 }
-
-export function showProblemListPanel(visible = true) {
-  mountProblemListPanel();
-  root.classList.toggle('visible', !!visible);
-  if (visible) {
-    // 面板打开时再做一次灌入
-    hydrateProblemsFromPresentations();
-    updateProblemList();
-  }
-}
-
-export function updateProblemList() {
-  mountProblemListPanel();
-  const container = $('#ykt-problem-list');
-  container.innerHTML = '';
-
-  // 兜底刷新
-  if (!repo.encounteredProblems || repo.encounteredProblems.length === 0) {
-    hydrateProblemsFromPresentations();
-  }
-
-  const list = (repo.encounteredProblems || []);
-  L('updateProblemList', { count: list.length });
-
-  if (list.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'problem-empty';
-    empty.textContent = '暂无题目（可尝试切换章节或刷新页面）';
-    container.appendChild(empty);
-    return;
-  }
-
-  list.forEach((e) => {
-    let prob = repo.problems.get(e.problemId) || null;
-    if (!prob) {
-      const cross = crossFindProblem(String(e.problemId));
-      if (cross) {
-        prob = cross.problem;
-        e.presentationId = e.presentationId || cross.presentationId;
-        e.slide = e.slide || cross.slide;
-        e.slideId = e.slideId || cross.slide?.id;
-        L('cross-fill problem', { pid: e.problemId, pres: e.presentationId, slideId: e.slideId });
-      }
-    }
-
-    const row = document.createElement('div');
-    row.className = 'problem-row';
-
-    const title = document.createElement('div');
-    title.className = 'problem-title';
-    row.appendChild(title);
-
-    const meta = document.createElement('div');
-    meta.className = 'problem-meta';
-    row.appendChild(meta);
-
-    const actionsBar = document.createElement('div');
-    actionsBar.className = 'problem-actions';
-    row.appendChild(actionsBar);
-
-    bindRowActions(row, e, prob || {});
-    updateRow(row, e, prob || {});
-    container.appendChild(row);
+function makeRow(p, lessonId) {
+  const row = create('div', null, 'problem-row'); row.dataset.problemId = p.problemId;
+  const title = create('div', null, 'problem-title'), meta = create('div', null, 'problem-meta'), bar = create('div', null, 'problem-actions'), detail = create('div', null, 'problem-detail');
+  const input = create('textarea'); input.rows = 4; input.placeholder = '选项如 ["A","C"]；填空如 ["-1","(-∞,0]"]；主观题可直接输入正文。';
+  input.value = p.draftText ?? (p.aiProposal ? JSON.stringify(p.aiProposal) : hasSubmittedAnswer(p.result) ? JSON.stringify(p.result) : '');
+  const draftInfo = create('small', '', 'draft-status'), proposal = create('pre', '', 'ai-proposal');
+  const select = create('select');
+  for (const [value, label] of [['auto', '按题目状态提交'], ['normal', '只正常提交'], ['retry', '强制补交'], ['local', '只保存本地']]) { const opt = create('option', label); opt.value = value; select.appendChild(opt); }
+  select.value = ui.config.submissionPolicy || 'auto';
+  const button = (text, fn) => { const b = create('button', text); b.onclick = fn; bar.appendChild(b); return b; };
+  input.addEventListener('input', () => { const ok = repo.saveDraft(p.problemId, input.value, lessonId); draftInfo.textContent = ok ? '本地草稿已保存 · 未提交' : '草稿仍在内存，持久化失败，请清理存储空间'; });
+  button('查看课件', () => actions.navigateTo(p.presentationId, p.slideId));
+  button('AI 建议', () => window.dispatchEvent(new CustomEvent('ykt:open-ai', { detail: { problemId: p.problemId, lessonId, slideId: p.slideId } })));
+  button('AI 作答并处理', async () => { await actions.handleAutoAnswer(p, { lessonId, source: 'manual', force: true }); updateProblemList(); });
+  button('采用 AI 建议', () => { if (!p.aiProposal) return ui.toast('此题尚无 AI 建议'); input.value = JSON.stringify(p.aiProposal); repo.saveDraft(p.problemId, input.value, lessonId); draftInfo.textContent = 'AI 建议已成为本地草稿 · 未提交'; });
+  const submit = button('提交答案', async () => {
+    if (select.value === 'local') { draftInfo.textContent = repo.saveDraft(p.problemId, input.value, lessonId) ? '本地草稿已保存 · 未提交' : '本地保存失败，草稿仍在编辑器'; return; }
+    try {
+      const value = validateAnswer(p, actions.parseManual(p.problemType, input.value));
+      repo.saveDraft(p.problemId, input.value, lessonId);
+      const revision = p.draftRevision, account = repo.accountId;
+      submit.disabled = true;
+      const out = await submitAnswer(p, value, { lessonId, policy: select.value, forceRetry: select.value === 'retry', guard: () => { if (p.draftRevision !== revision || repo.accountId !== account) throw new Error('草稿或账号已变化，提交已停止'); } });
+      ui.toast(out.route === 'retry' ? '服务器已确认补交成功' : out.route === 'local' ? '已保存本地，尚未提交' : '服务器已确认提交成功');
+    } catch (error) { ui.toast(error.message, 4500); }
+    finally { submit.disabled = false; updateProblemList(); }
   });
+  bar.insertBefore(select, submit);
+  select.addEventListener('change', () => updateRow(row, p, lessonId));
+  button('核实服务器答案', async () => {
+    const pres = repo.forLesson(lessonId).presentations.get(p.presentationId);
+    if (!pres?.sourceUrl) return ui.toast('尚无可复用的课件请求，请在官方页面重新打开此课件以同步答案', 5000);
+    try { const response = await fetch(pres.sourceUrl, { credentials: 'include' }); if (!response.ok) throw new Error(`HTTP ${response.status}`); const json = await response.json(); const data = json.data || json; if (!Array.isArray(data.slides)) throw new Error('服务器未返回课件数据'); actions.onPresentationLoaded(pres.id, data, { lessonId }); ui.toast('已读取课件；以服务器实际返回的答案为准'); } catch (error) { ui.toast(`核实失败：${error.message}`); }
+  });
+  detail.append(input, draftInfo, proposal); row.append(title, meta, bar, detail);
+  row.__editor = { input, title, meta, proposal, submit, select, draftInfo }; return row;
 }
+function updateRow(row, p, lessonId) {
+  const { title, meta, proposal, submit, select } = row.__editor;
+  const s = repo.forLesson(lessonId).problemStatus.get(p.problemId) || {};
+  title.textContent = p.body || `题目 ${p.problemId}`;
+  const ended = s.finished || (Number.isFinite(s.endTime) && Date.now() >= s.endTime);
+  meta.textContent = `PID: ${p.problemId} / ${hasSubmittedAnswer(p.result) ? '服务器已确认作答' : s.needsReconciliation ? '提交结果待核实' : '未提交'} / ${ended ? '已结束' : s.endTime == null ? '不限时' : '开放'}${s.lastError ? ' / ' + s.lastError : ''}`;
+  proposal.textContent = p.aiProposal ? `AI 建议：${JSON.stringify(p.aiProposal)}${p.verificationProposal ? '\n复核建议：' + JSON.stringify(p.verificationProposal) : ''}` : p.proposalRaw ? `AI 原文（待编辑）：${p.proposalRaw}` : '';
+  submit.textContent = select.value === 'local' ? '保存本地' : select.value === 'retry' || (select.value === 'auto' && ended) ? '强制补交' : '提交答案';
+  submit.disabled = s.phase === 'submitting';
+}
+export function updateProblemList() {
+  mountProblemListPanel(); const container = document.getElementById('ykt-problem-list');
+  const context = `${repo.accountId}:${repo.currentLessonId}`;
+  if (context !== viewKey) { container.replaceChildren(); rows.clear(); viewKey = context; }
+  const ctx = repo.forLesson(), ids = new Set();
+  for (const [id, p] of ctx.problems) {
+    ids.add(id); let row = rows.get(id);
+    if (!row) { row = makeRow(p, ctx.lessonId); rows.set(id, row); container.appendChild(row); }
+    updateRow(row, p, ctx.lessonId);
+  }
+  for (const [id, row] of rows) if (!ids.has(id)) { row.remove(); rows.delete(id); }
+  let empty = container.querySelector('.problem-empty');
+  if (!ids.size && !empty) { empty = create('div', '暂无题目', 'problem-empty'); container.appendChild(empty); }
+  if (ids.size) empty?.remove();
+}
+export function showProblemListPanel(visible = true) { mountProblemListPanel(); root.classList.toggle('visible', visible); if (visible) updateProblemList(); }

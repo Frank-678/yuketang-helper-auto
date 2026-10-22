@@ -1,3 +1,4 @@
+import { validateAnswer } from '../core/answer-state.js';
 function cleanProblemBody(body, problemType, TYPE_MAP) {
   if (!body) return '';
   
@@ -141,171 +142,34 @@ export function formatProblemForDisplay(problem, TYPE_MAP) {
 }
 
 // 改进的答案解析函数
-export function parseAIAnswer(problem, aiAnswer) {
+export function parseAIAnswer(problem, response) {
   try {
-    const lines = String(aiAnswer || '').split('\n');
-    let answerLine = '';
-    let answerIdx = -1;
-
-    // 先定位“答案:”所在行
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.includes('答案:') || line.includes('答案：')) {
-        answerLine = line.replace(/答案[:：]\s*/, '').trim();
-        answerIdx = i;
-        break;
+    const type = Number(problem.problemType);
+    let text = String(response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const label = text.match(/(?:^|\n)\s*(?:\*\*)?(?:答案|answer)\s*[:：]\s*(?:\*\*)?/i);
+    if (label) text = text.slice(label.index + label[0].length).split(/\n\s*(?:解释|解析|说明|explanation)\s*[:：]/i)[0].trim();
+    let parsed;
+    try { parsed = JSON.parse(text); } catch {}
+    if (parsed && !Array.isArray(parsed) && typeof parsed === 'object' && Object.hasOwn(parsed, 'answer')) parsed = parsed.answer;
+    if ([1, 2, 3].includes(type)) {
+      if (!Array.isArray(parsed)) {
+        const clean = text.replace(/^(?:选择|选项|选)\s*/, '').trim().toUpperCase();
+        if (!/^[A-Z](?:[\s,，、;；]*[A-Z])*$/.test(clean)) return null;
+        parsed = clean.match(/[A-Z]/g);
       }
-    }
-
-    // === 对填空题和主观题，允许多行答案 ===
-    if ((problem.problemType === 4 || problem.problemType === 5) && answerIdx >= 0) {
-      const block = [];
-
-      // 当前行如果有内容，先收进去
-      if (answerLine) block.push(answerLine);
-
-      // 继续向下收集，直到遇到“解释:”或文本结束
-      for (let i = answerIdx + 1; i < lines.length; i++) {
-        const l = lines[i];
-        if (/^\s*解释[:：]/.test(l)) break;
-        block.push((l || '').trimEnd());
+    } else if (type === 4 && !Array.isArray(parsed)) {
+      const count = problem.blanks?.length || 1;
+      if (count === 1) parsed = [typeof parsed === 'string' || typeof parsed === 'number' ? String(parsed) : text];
+      else {
+        const lines = text.split(/\n+/).map(x => x.replace(/^\s*\d+[.、)]\s*/, '').trim()).filter(Boolean);
+        if (lines.length === count) parsed = lines;
+        else {
+          const parts = text.split(/[,，;；]/).map(x => x.trim());
+          if (parts.length !== count || parts.some(x => /[()[\]{}]/.test(x))) return null;
+          parsed = parts;
+        }
       }
-
-      const merged = block.join('\n').trim();
-      if (merged) {
-        answerLine = merged;
-      }
-    }
-
-    // 如果仍然没有任何答案内容，退回到第一行兜底
-    if (!answerLine) {
-      answerLine = (lines[0] || '').trim();
-    }
-
-    console.log(
-      '[雨课堂助手][INFO][parseAIAnswer] 题目类型:',
-      problem.problemType,
-      '原始答案行:',
-      answerLine
-    );
-
-    switch (problem.problemType) {
-      case 1: // 单选题
-      case 3: { // 投票题
-        let m = answerLine.match(/[ABCDEFGHIJKLMNOPQRSTUVWXYZ]/);
-        if (m) {
-          console.log('[雨课堂助手][INFO][parseAIAnswer] 单选/投票解析结果:', [m[0]]);
-          return [m[0]];
-        }
-        
-        const chineseMatch = answerLine.match(/选择?([ABCDEFGHIJKLMNOPQRSTUVWXYZ])/);
-        if (chineseMatch) {
-          console.log('[雨课堂助手][INFO][parseAIAnswer] 单选/投票中文解析结果:', [chineseMatch[1]]);
-          return [chineseMatch[1]];
-        }
-        
-        console.log('[雨课堂助手][INFO][parseAIAnswer] 单选/投票解析失败');
-        return null;
-      }
-      
-      case 2: { // 多选题
-        if (answerLine.includes('、')) {
-          const options = answerLine.split('、')
-            .map(s => s.trim().match(/[ABCDEFGHIJKLMNOPQRSTUVWXYZ]/))
-            .filter(m => m)
-            .map(m => m[0]);
-          if (options.length > 0) {
-            const result = [...new Set(options)].sort();
-            console.log('[雨课堂助手][INFO][parseAIAnswer] 多选顿号解析结果:', result);
-            return result;
-          }
-        }
-        
-        if (answerLine.includes(',') || answerLine.includes('，')) {
-          const options = answerLine.split(/[,，]/)
-            .map(s => s.trim().match(/[ABCDEFGHIJKLMNOPQRSTUVWXYZ]/))
-            .filter(m => m)
-            .map(m => m[0]);
-          if (options.length > 0) {
-            const result = [...new Set(options)].sort();
-            console.log('[雨课堂助手][INFO][parseAIAnswer] 多选逗号解析结果:', result);
-            return result;
-          }
-        }
-        
-        const letters = answerLine.match(/[ABCDEFGHIJKLMNOPQRSTUVWXYZ]/g);
-        if (letters && letters.length > 1) {
-          const result = [...new Set(letters)].sort();
-          console.log('[雨课堂助手][INFO][parseAIAnswer] 多选连续解析结果:', result);
-          return result;
-        }
-        
-        if (letters && letters.length === 1) {
-          console.log('[雨课堂助手][INFO][parseAIAnswer] 多选单个解析结果:', letters);
-          return letters;
-        }
-        
-        console.log('[雨课堂助手][INFO][parseAIAnswer] 多选解析失败');
-        return null;
-      }
-      
-      case 4: { // 填空题
-        // 更激进的清理策略
-        let cleanAnswer = answerLine
-          .replace(/^(填空题|简答题|问答题|题目|答案是?)[:：\s]*/gi, '')
-          .trim();
-        
-        console.log('[雨课堂助手][INFO][parseAIAnswer] 清理后答案:', cleanAnswer);
-        
-        // 如果清理后还包含这些词，继续清理
-        if (/填空题|简答题|问答题|题目/i.test(cleanAnswer)) {
-          cleanAnswer = cleanAnswer.replace(/填空题|简答题|问答题|题目/gi, '').trim();
-          console.log('[雨课堂助手][INFO][parseAIAnswer] 二次清理后:', cleanAnswer);
-        }
-        
-        const answerLength = cleanAnswer.length;
-        
-        if (answerLength <= 50) {
-          cleanAnswer = cleanAnswer.replace(/^[^\w\u4e00-\u9fa5]+/, '').replace(/[^\w\u4e00-\u9fa5]+$/, '');
-          
-          const blanks = cleanAnswer.split(/[,，;；\s]+/).filter(Boolean);
-          if (blanks.length > 0) {
-            console.log('[雨课堂助手][INFO][parseAIAnswer] 填空解析结果:', blanks);
-            return blanks;
-          }
-        }
-        
-        if (cleanAnswer) {
-          const result = { content: cleanAnswer, pics: [] };
-          console.log('[雨课堂助手][INFO][parseAIAnswer] 简答题解析结果:', result);
-          return result;
-        }
-        
-        console.log('[雨课堂助手][INFO][parseAIAnswer] 填空/简答解析失败');
-        return null;
-      }
-      
-      case 5: { // 主观题
-        const content = answerLine
-          .replace(/^(主观题|论述题)[:：\s]*/i, '')
-          .trim();
-          
-        if (content) {
-          const result = { content, pics: [] };
-          console.log('[雨课堂助手][INFO][parseAIAnswer] 主观题解析结果:', result);
-          return result;
-        }
-        
-        console.log('[雨课堂助手][INFO][parseAIAnswer] 主观题解析失败');
-        return null;
-      }
-      
-      default:
-        console.log('[雨课堂助手][INFO][parseAIAnswer] 未知题目类型:', problem.problemType);
-        return null;
-    }
-  } catch (e) {
-    console.error('[雨课堂助手][ERR][parseAIAnswer] 解析失败', e);
-    return null;
-  }
+    } else if (type === 5 && (!parsed || typeof parsed !== 'object')) parsed = { content: typeof parsed === 'string' ? parsed : text, pics: [] };
+    return validateAnswer(problem, parsed);
+  } catch { return null; }
 }
