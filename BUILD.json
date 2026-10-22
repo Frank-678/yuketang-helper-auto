@@ -1,0 +1,11 @@
+{
+  "version": "1.22.0",
+  "sha256": "7fff9279c55e3174100964995b6b6ef620634ab8c6bc8ec95037c30e4165ac6c",
+  "size_bytes": 317954,
+  "node": "24.19.0",
+  "tests": 136,
+  "passed": 136,
+  "failed": 0,
+  "scope": "isolated bundled userscript + pure modules",
+  "remote_ci": "pending"
+}
