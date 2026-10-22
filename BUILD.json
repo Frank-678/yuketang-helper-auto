@@ -7,5 +7,15 @@
   "passed": 136,
   "failed": 0,
   "scope": "isolated bundled userscript + pure modules",
-  "remote_ci": "pending"
+  "remote_ci": "success",
+  "remote_commit": "6e88985c7fe3c28bc33a666c21cdaf9983514438",
+  "remote_tree": "27a45fd50a664edb6e8d0684d912e48fc59a154c",
+  "runtime_blob": "2ba4362c44b942b88f7e26fba416995881b7aa6d",
+  "remote_ci_run": 39753439763,
+  "branch_cleanup": "success",
+  "remaining_branches": [
+    "main",
+    "ANALYSIS"
+  ],
+  "published_download_checksum_verified": true
 }

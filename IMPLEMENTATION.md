@@ -34,3 +34,16 @@
 远端提交：6e88985c7fe3c28bc33a666c21cdaf9983514438。远端产品 tree 为 27a45fd50a664edb6e8d0684d912e48fc59a154c，与本地验收工作区的 tree 完全一致；发布 blob 为 2ba4362c44b942b88f7e26fba416995881b7aa6d，与已测试文件一致。
 
 fix/unified-answer-flow 已建立并推送；未创建 PR。远端 CI 正在核实，main 更新与归档清理等待该检查结果。
+
+## 2026-10-22：远端验证与主线发布
+
+修复分支 CI 已通过： https://github.com/Frank-678/yuketang-helper-auto/actions/runs/39753253529 。main 以 expected SHA 保护快进到 6e88985c7fe3c28bc33a666c21cdaf9983514438，未强推、未创建 PR。主线 CI 与一次性分支归档清理已触发，待最终结果记录。
+
+## 2026-10-22：发布与清理完成
+
+- main 最终提交：6e88985c7fe3c28bc33a666c21cdaf9983514438。
+- main CI： https://github.com/Frank-678/yuketang-helper-auto/actions/runs/39753439763 ，test-and-build 与 archive-retired-branches 两个作业均为 success。
+- 共删除 26 个分支引用（25 个旧分支与本轮修复分支）；21 个去重分支头建立归档 tag。另保留修复前 main、1.21.7 可运行源码基线以及 v1.22.0 版本 tag。
+- 远端分支列表实查只剩 main 和 ANALYSIS，未删除原始提交对象或重写 main 历史。
+- 从 GitHub 再次读取稳定安装文件并计算校验：317954 字节，SHA-256 7fff9279c55e3174100964995b6b6ef620634ab8c6bc8ec95037c30e4165ac6c，与本地验收产物完全一致。
+- 分支清理映射见 BRANCH-CLEANUP.md；回归结果与边界见 VALIDATION.md。所有工作记录保持在本分支，未合并进产品主线。
