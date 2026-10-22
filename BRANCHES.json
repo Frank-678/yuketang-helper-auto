@@ -1,0 +1,263 @@
+[
+  {
+    "branch": "audit/full-regression-20260917",
+    "sha": "b38daf939d4d03ae6b9f9a5aa21143f5060a3ce9",
+    "retain": false,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-17 release: publish 1.21.6.5 full-regression field test"
+  },
+  {
+    "branch": "audit/independent-blackbox-20260917",
+    "sha": "8e123ae913e48156950dd94d0cf9bdb5b1bc6f37",
+    "retain": false,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-17 ci(audit): cancel superseded source audit runs"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-real",
+    "sha": "8f5ae400338ace1f5d1302686d81a04e17b65331",
+    "retain": false,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-17 ci: stabilize npm install and scenario runner"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-scenario",
+    "sha": "8f5ae400338ace1f5d1302686d81a04e17b65331",
+    "retain": false,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-17 ci: stabilize npm install and scenario runner"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-scratch",
+    "sha": "8f5ae400338ace1f5d1302686d81a04e17b65331",
+    "retain": false,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-17 ci: stabilize npm install and scenario runner"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-scratch-2",
+    "sha": "8f5ae400338ace1f5d1302686d81a04e17b65331",
+    "retain": false,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-17 ci: stabilize npm install and scenario runner"
+  },
+  {
+    "branch": "audit/runtime-bootstrap-validation",
+    "sha": "4b78acbc4ae420fa21410f430c4203e41eae3214",
+    "retain": false,
+    "contained_in": [],
+    "unique_vs_retained": 1,
+    "subject": "2026-09-17 test: execute first-load runtime bootstrap without forced reload"
+  },
+  {
+    "branch": "backup-before-b85ca499",
+    "sha": "b2fa1f5fe5d56f672e5d2049e257b8ae009c2d2f",
+    "retain": false,
+    "contained_in": [],
+    "unique_vs_retained": 2,
+    "subject": "2026-09-14 Merge pull request #2 from HITweihai/revert-1-feat/recover-auto-answer-1215"
+  },
+  {
+    "branch": "backup/pre-core-rebuild-20260917",
+    "sha": "0af2f7fa5ab13eb2c9283a741c8586d3d3c4f25b",
+    "retain": false,
+    "contained_in": [
+      "main",
+      "rebuild/1.21.7-from-1.21.4",
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-16 fix: retry live unlock hydration and expose field diagnostics"
+  },
+  {
+    "branch": "backup/pre-final-consolidation-20260917",
+    "sha": "6504f74c6922dcce024b63746436533ee7f48297",
+    "retain": false,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-17 fix: preserve native socket during AutoJoin stale pruning"
+  },
+  {
+    "branch": "backup/pre-independent-blackbox-20260917",
+    "sha": "b38daf939d4d03ae6b9f9a5aa21143f5060a3ce9",
+    "retain": false,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-17 release: publish 1.21.6.5 full-regression field test"
+  },
+  {
+    "branch": "backup/pre-restore-20260916",
+    "sha": "bbc690a758bb346ece9be45e07a3301b73c89999",
+    "retain": false,
+    "contained_in": [],
+    "unique_vs_retained": 4,
+    "subject": "2026-09-14 Add project inheritance information to README"
+  },
+  {
+    "branch": "backup/pre-restore-before-revert-20260916",
+    "sha": "bbc690a758bb346ece9be45e07a3301b73c89999",
+    "retain": false,
+    "contained_in": [],
+    "unique_vs_retained": 4,
+    "subject": "2026-09-14 Add project inheritance information to README"
+  },
+  {
+    "branch": "backup/pre-stability-fix-20260916",
+    "sha": "ed823033fcc64f65be955935bdb9419332e82bf8",
+    "retain": false,
+    "contained_in": [
+      "main",
+      "rebuild/1.21.7-from-1.21.4",
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-12 Merge pull request #1 from HITweihai/feat/recover-auto-answer-1215"
+  },
+  {
+    "branch": "chrome141",
+    "sha": "8075578d5902afa563cc579dbb8d116bc1208e54",
+    "retain": false,
+    "contained_in": [
+      "main",
+      "rebuild/1.21.7-from-1.21.4",
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2025-10-21 1.19.0: 增加fetch接口"
+  },
+  {
+    "branch": "dev-2.0",
+    "sha": "799f26a4f11b18a9cd799a7e0a80a2c8d9b06022",
+    "retain": false,
+    "contained_in": [
+      "main",
+      "rebuild/1.21.7-from-1.21.4",
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-03-19 1.21.1: 修改UIbug"
+  },
+  {
+    "branch": "feat/dev3.0",
+    "sha": "ab0268b8e223af59e76944b2f4d10774df9480b3",
+    "retain": false,
+    "contained_in": [],
+    "unique_vs_retained": 4,
+    "subject": "2026-08-30 feat: add websocket viewer"
+  },
+  {
+    "branch": "feat/recover-auto-answer-1215",
+    "sha": "dd4b0bb3b43ed4b2bacd4791d92299bfe15e129e",
+    "retain": false,
+    "contained_in": [
+      "main",
+      "rebuild/1.21.7-from-1.21.4",
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-11 release: publish yuketang helper 1.21.6"
+  },
+  {
+    "branch": "fix/independent-audit-remediation-20260917",
+    "sha": "af37eb9ac6341f384f6ad7fc9be082b50270341a",
+    "retain": false,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-18 chore: remove one-time 1.21.6.9 build workflow"
+  },
+  {
+    "branch": "fix/pr5-verification-and-save-feedback-20260920",
+    "sha": "9112debfc089f903a985f545199d2c748d4b18e9",
+    "retain": true,
+    "contained_in": [
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-20 ci: update black-box Playwright test dependency"
+  },
+  {
+    "branch": "fix/stability-auto-answer-20260916",
+    "sha": "35c5affb86f4be2a2c4c49b236a1c36049ab9bb6",
+    "retain": false,
+    "contained_in": [
+      "main",
+      "rebuild/1.21.7-from-1.21.4",
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-09-17 fix: restore answer execution and periodic refresh"
+  },
+  {
+    "branch": "main",
+    "sha": "0a5edb799629e71b92140b4a21f90105b31710ff",
+    "retain": true,
+    "contained_in": [
+      "main"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-10-10 Merge pull request #7 from Frank-678/rebuild/1.21.7-from-1.21.4"
+  },
+  {
+    "branch": "rebuild/1.21.7-from-1.21.4",
+    "sha": "f8dea761fc77193e8b2c1b813e1a041ae84329cc",
+    "retain": true,
+    "contained_in": [
+      "main",
+      "rebuild/1.21.7-from-1.21.4"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-10-10 Merge branch 'main' into rebuild/1.21.7-from-1.21.4"
+  },
+  {
+    "branch": "restore/pre-revert-ed823033",
+    "sha": "b5f51f47e6ca5b8fb632cdc32922a9f6448969a7",
+    "retain": false,
+    "contained_in": [],
+    "unique_vs_retained": 5,
+    "subject": "2026-09-16 restore: return repository to pre-revert snapshot ed823033"
+  },
+  {
+    "branch": "revert-1-feat/recover-auto-answer-1215",
+    "sha": "922330ddb759224617fa59b8e2e47a20c1cf55a7",
+    "retain": false,
+    "contained_in": [],
+    "unique_vs_retained": 1,
+    "subject": "2026-09-14 Revert \"Feat/recover auto answer 1215\""
+  },
+  {
+    "branch": "zy-dev",
+    "sha": "9c869e119b721ae9dd8dd5d11ec7aebfefb6f9c7",
+    "retain": false,
+    "contained_in": [
+      "main",
+      "rebuild/1.21.7-from-1.21.4",
+      "fix/pr5-verification-and-save-feedback-20260920"
+    ],
+    "unique_vs_retained": 0,
+    "subject": "2026-05-13 feat: 新增前端调试的脚本"
+  }
+]
