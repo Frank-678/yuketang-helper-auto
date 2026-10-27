@@ -1,21 +1,46 @@
 {
-  "version": "1.22.0",
-  "sha256": "7fff9279c55e3174100964995b6b6ef620634ab8c6bc8ec95037c30e4165ac6c",
-  "size_bytes": 317954,
-  "node": "24.19.0",
-  "tests": 136,
-  "passed": 136,
+  "version": "1.22.1",
+  "sha256": "87b57786967874053c6a84b868cb286d9c00309af396212d896438d84a036a69",
+  "size_bytes": 333806,
+  "node": "24.22.1",
+  "tests": 180,
+  "passed": 180,
   "failed": 0,
-  "scope": "isolated bundled userscript + pure modules",
+  "scope": "isolated bundled userscript network-to-UI flows + pure modules",
   "remote_ci": "success",
-  "remote_commit": "6e88985c7fe3c28bc33a666c21cdaf9983514438",
-  "remote_tree": "27a45fd50a664edb6e8d0684d912e48fc59a154c",
-  "runtime_blob": "2ba4362c44b942b88f7e26fba416995881b7aa6d",
-  "remote_ci_run": 39753439763,
-  "branch_cleanup": "success",
+  "remote_commit": "fba66658669ce75a0a1c920fa1c09d0474bb6f1c",
+  "remote_tree": "e43755e5c2770da011b5a13d591d1b5179b03a35",
+  "runtime_blob": "29f44fae3c06bba3bd672e3cb11277a7bb24f2c4",
+  "remote_ci_run": 40425345821,
+  "remote_ci_url": "https://github.com/Frank-678/yuketang-helper-auto/actions/runs/40425345821",
   "remaining_branches": [
     "main",
     "ANALYSIS"
   ],
-  "published_download_checksum_verified": true
+  "published_blob_verified": true,
+  "source_blob_verification": {
+    "files": 82,
+    "mismatches": 0
+  },
+  "previous_release": {
+    "version": "1.22.0",
+    "sha256": "7fff9279c55e3174100964995b6b6ef620634ab8c6bc8ec95037c30e4165ac6c",
+    "size_bytes": 317954,
+    "node": "24.19.0",
+    "tests": 136,
+    "passed": 136,
+    "failed": 0,
+    "scope": "isolated bundled userscript + pure modules",
+    "remote_ci": "success",
+    "remote_commit": "6e88985c7fe3c28bc33a666c21cdaf9983514438",
+    "remote_tree": "27a45fd50a664edb6e8d0684d912e48fc59a154c",
+    "runtime_blob": "2ba4362c44b942b88f7e26fba416995881b7aa6d",
+    "remote_ci_run": 39753439763,
+    "branch_cleanup": "success",
+    "remaining_branches": [
+      "main",
+      "ANALYSIS"
+    ],
+    "published_download_checksum_verified": true
+  }
 }
