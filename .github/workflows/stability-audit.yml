@@ -37,7 +37,7 @@ jobs:
         run: npm test
 
       - name: Check built artifact syntax
-        run: node --check dist/ykt-helper-1220.user.js
+        run: node --check dist/ykt-helper-1221.user.js
 
   archive-retired-branches:
     needs: test-and-build
@@ -56,3 +56,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/retire-branches.py --apply
+

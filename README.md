@@ -2,12 +2,14 @@
 
 课堂提醒、课件浏览、AI 辅助分析与可配置的作答流程。继承自 [ZaytsevZY/yuketang-helper-auto](https://github.com/ZaytsevZY/yuketang-helper-auto)，MIT 许可。
 
-当前版本：**1.22.0**。源码入口为 `ykt-helper/src/index.js`。
+当前版本：**1.22.1**。源码入口为 `ykt-helper/src/index.js`。
+
+1.22.1 修复了 1.22.0 的课件采集回归：服务器仅在请求 URL 提供课件编号时，助手也会正确载入幻灯片。升级后刷新课堂页即可重新采集；课件暂时只显示题目页时，可点“显示全部页面”。
 
 ## 安装
 
 1. 在 Chrome / Edge 安装 [Tampermonkey](https://www.tampermonkey.net/)，允许用户脚本运行。
-2. [安装当前版本](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper.user.js)。版本固定副本位于 [release/ykt-helper-1220.user.js](release/ykt-helper-1220.user.js)。
+2. [安装当前版本](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper.user.js)。版本固定副本位于 [release/ykt-helper-1221.user.js](release/ykt-helper-1221.user.js)。
 3. 登录雨课堂，在助手设置中填写自己的模型接口、API Key 和模型 ID。
 4. 初次升级后检查自动作答、提交方式和快答配置，再按自己的需求开启。
 
@@ -26,6 +28,8 @@
 | 只生成并保存本地 | 保留候选与草稿，等待手动处理 |
 
 题目列表和 AI 面板均可编辑答案、选择处理方式、采用 AI 建议。强制补交仍由平台决定是否接受；只有服务器逐题确认成功才显示成功。
+
+在官方课堂 PPT 页面切到题目页，旁边会出现“输入答案并强制提交”；在助手课件查看器里选择题目页，题干旁也有同一入口。单选输入 `B`，多选输入 `AC`；填空按“第 1 空、第 2 空”分别填写，数字、负号、区间与公式原样封装。按钮直接使用强制补交，已结束、已答过的题也可明确重提。非题目页收起入口，切页和账号变化会校验题号，输入内容保留为本地草稿。
 
 网络中断、超时、无效响应或“已经作答”冲突会保留答案并显示待核实。可复用已观察到的课件请求同步；服务器未返回结果时，需要在官方页面重新打开相应课件。不会把结果未知当成成功，也不会循环盲目重交。
 
@@ -69,6 +73,7 @@ npm ci
 npm test
 ```
 
-修改源码后运行 `npm run release` 同步发布副本。`npm test` 先构建实际安装产物，再运行模块测试和 JSDOM 组合回归。生成文件为 `ykt-helper/dist/ykt-helper-1220.user.js`，发布时同步到 `release/ykt-helper-1220.user.js` 和 `release/ykt-helper.user.js`。
+修改源码后运行 `npm run release` 同步发布副本。`npm test` 先构建实际安装产物，再运行模块测试和 JSDOM 组合回归。生成文件为 `ykt-helper/dist/ykt-helper-1221.user.js`，发布时同步到 `release/ykt-helper-1221.user.js` 和 `release/ykt-helper.user.js`。
 
 隔离测试不代表真实课堂全环境验收。服务器接口/改答权限、真实图片 CORS、Android/Tampermonkey、系统权限、后台冻结与模型答案正确率仍取决于实际环境。当前不提供服务器无人值守程序、手机号密码自动登录、整份考试试卷的通用提交或动态二维码处理。
+

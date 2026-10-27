@@ -5,6 +5,7 @@ import { actions } from '../../state/actions.js';
 import { ensureHtml2Canvas, ensureJsPDF } from '../../core/env.js';
 import { captureSlideImage } from '../../capture/screenshoot.js';
 import { queryOCRVision, queryTranslationText } from '../../ai/openai.js';
+import { createQuickAnswerButton } from '../quick-answer.js';
 
 let mounted = false;
 let host;
@@ -878,6 +879,17 @@ export function updatePresentationList() {
     const showAll = !!ui.config.showAllSlides;
     const slides = (presentation.slides || []);
     const slidesToShow = showAll ? slides : slides.filter(s => s.problem);
+    if (!showAll && slides.length && !slidesToShow.length) {
+      const hint = document.createElement('p');
+      hint.className = 'no-problem-slides';
+      hint.textContent = '当前仅显示题目页，这份课件没有题目页。';
+      const showAllButton = document.createElement('button');
+      showAllButton.type = 'button';
+      showAllButton.textContent = '显示全部页面';
+      showAllButton.addEventListener('click', () => $('#ykt-show-all-slides')?.click());
+      hint.appendChild(showAllButton);
+      slidesWrap.appendChild(hint);
+    }
 
     const currentIdStr = repo.currentSlideId != null ? String(repo.currentSlideId) : null;
     L('渲染课件缩略图', {
@@ -956,12 +968,22 @@ export function updatePresentationList() {
       if (presentation.width && presentation.height) {
         img.style.aspectRatio = `${presentation.width}/${presentation.height}`;
       }
-      img.src = s.thumbnail || '';
+      const imageCandidates = [...new Set([s.thumbnail, s.coverAlt, s.cover, s.image].filter(value => typeof value === 'string' && value))];
+      let imageCandidate = 0;
       img.alt = s.title || `第 ${s.page ?? ''} 页`;
       img.onerror = function () {
-        W('缩略图加载失败，移除该项', { slideIdStr, src: img.src });
-        if (thumb.parentNode) thumb.parentNode.removeChild(thumb);
+        if (++imageCandidate < imageCandidates.length) { img.src = imageCandidates[imageCandidate]; return; }
+        W('课件图片暂不可用，保留页面入口', { slideIdStr });
+        img.onerror = null;
+        img.hidden = true;
+        img.style.display = 'none';
+        const message = document.createElement('span');
+        message.className = 'slide-image-error';
+        message.textContent = '图片暂不可用';
+        thumb.appendChild(message);
       };
+      if (imageCandidates.length) img.src = imageCandidates[0];
+      else img.onerror();
 
       const idx = document.createElement('span');
       idx.className = 'slide-index';
@@ -987,7 +1009,6 @@ export function updateSlideView() {
   mountPresentationPanel();
   const slideView = $('#ykt-slide-view');
   const problemView = $('#ykt-problem-view');
-  slideView.querySelector('.slide-cover')?.classList.add('hidden');
   problemView.innerHTML = '';
   renderOCRState();
   renderTranslationState();
@@ -996,18 +1017,20 @@ export function updateSlideView() {
   const lookup = getSlideByAny(curId);
   L('updateSlideView', { curId, lookupHit: lookup.hit, hasInMap: !!lookup.slide });
 
-  if (!curId) {
-    slideView.querySelector('.slide-cover')?.classList.remove('hidden');
+  if (!curId || !lookup.slide) {
+    const emptyCover = document.createElement('div');
+    emptyCover.className = 'slide-cover';
+    const emptyMessage = document.createElement('div');
+    emptyMessage.className = 'empty-message';
+    emptyMessage.textContent = curId ? '当前页面尚未加载，请在左侧重新选择。' : '选择左侧的幻灯片查看详情';
+    emptyCover.appendChild(emptyMessage);
+    slideView.replaceChildren(emptyCover, problemView);
+    if (curId) W('updateSlideView: 根据 curId 未取到 slide', { curId });
     renderOCRState();
     renderTranslationState();
     return;
   }
   const slide = lookup.slide;
-  if (!slide) {
-    W('updateSlideView: 根据 curId 未取到 slide', { curId });
-    renderTranslationState();
-    return;
-  }
 
   const cover = document.createElement('div');
   cover.className = 'slide-cover';
@@ -1051,6 +1074,7 @@ export function updateSlideView() {
       box.appendChild(opts);
     }
     problemView.appendChild(box);
+    box.appendChild(createQuickAnswerButton({ lessonId: repo.currentLessonId, slideId: curId, problemId: String(prob.problemId), source: 'presentation' }));
   }
 
   slideView.innerHTML = '';
@@ -1142,3 +1166,4 @@ async function downloadPresentationPDF() {
     ui.toast(`导出 PDF 失败：${e.message || e}`);
   }
 }
+

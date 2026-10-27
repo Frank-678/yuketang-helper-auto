@@ -26,7 +26,7 @@ const publishReminder = createPublishReminder({ notify: event => ui.notifyPublis
 const problemReminder = createEventReminder({ notify: event => ui.notifyClassroomEvent(event), isEnabled: (_, cfg) => isReminderEnabled('problem-start', cfg) });
 const key = value => value == null ? '' : String(value);
 const firstValue = (...values) => values.find(x => x != null && String(x).trim() !== '');
-const refresh = lessonId => { if (key(lessonId) !== key(repo.currentLessonId) || !document.body) return; ui.updateActiveProblems?.(); ui.updateProblemList?.(); };
+const refresh = lessonId => { if (key(lessonId) !== key(repo.currentLessonId) || !document.body) return; ui.updateActiveProblems?.(); ui.updateProblemList?.(); ui.refreshQuickAnswerControl?.(); };
 export function hasActiveAIProfile(cfg) { const list = cfg?.profiles || []; return !!(list.find(p => p.id === cfg.activeProfileId) || list[0])?.apiKey || (!list.length && !!cfg?.kimiApiKey); }
 export function effectiveAutoAnswer(lessonId) { return !ui.config.autoAnswerPaused && ((ui.config.autoAnswer && key(lessonId) === key(repo.currentLessonId)) || (ui.config.autoJoinEnabled && ui.config.autoAnswerOnAutoJoin && repo.autoJoinedLessons.has(key(lessonId)))); }
 function currentPageLessonId() { return location.pathname.match(/\/(?:lesson\/fullscreen\/v3|v2\/web\/lesson)\/([^/]+)/)?.[1] || null; }
@@ -240,7 +240,7 @@ export const actions = {
     const answer = validateAnswer(problem, this.parseManual(problem.problemType, content));
     const out = await submitAnswer(problem, answer, { ...options, lessonId }); refresh(lessonId); return out;
   },
-  navigateTo(presId, slideId) { repo.currentPresentationId = key(presId); repo.currentSlideId = key(slideId); ui.updateSlideView(); ui.showPresentationPanel(true); },
+  navigateTo(presId, slideId) { repo.currentPresentationId = key(presId); repo.currentSlideId = key(slideId); ui.updateSlideView(); ui.showPresentationPanel(true); ui.refreshQuickAnswerControl?.(); },
   launchLessonHelper() {
     if (lastAutoAnswer === null) lastAutoAnswer = ui.config.autoAnswer;
     const next = currentPageLessonId();
@@ -251,6 +251,7 @@ export const actions = {
     repo.loadStoredPresentations();
     const restored = repo.forLesson(next);
     for (const [id, status] of restored.problemStatus) { const p = restored.problems.get(id); if (p && (p.aiProposal || Date.now() - status.startTime < 1800000)) schedule(p, status, next); }
+    if (changed && document.body) { ui.updatePresentationList(); ui.updateSlideView(); }
     this.maybeStartAutoJoin(); void screenWakeLock.setEnabled(ui.config.keepScreenAwake);
     if (document.body) refresh(next);
   },
@@ -302,3 +303,4 @@ export const actions = {
   },
 };
 if (typeof window !== 'undefined') window.addEventListener('ykt:config-changed', () => actions.syncConfig());
+

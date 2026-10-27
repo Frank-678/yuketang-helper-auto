@@ -10,14 +10,16 @@ export function installXHRInterceptor() {
     proto.open = function(...args) {
       this.__yktUrl = String(args[1]);
       this.__yktLessonId = requestLessonId(this.__yktUrl, repo.currentLessonId);
+      this.__yktAccountId = repo.accountId;
       return nativeOpen.apply(this, args);
     };
     proto.send = function(body) {
-      const url = this.__yktUrl || '', lessonId = this.__yktLessonId;
+      const url = this.__yktUrl || '', lessonId = this.__yktLessonId, accountId = this.__yktAccountId;
       if (/lesson|presentation|slides|problem/.test(url)) this.addEventListener('load', () => {
         try {
+          if (this.status < 200 || this.status >= 300) return;
           const json = this.responseType === 'json' ? this.response : JSON.parse(this.responseText);
-          observeResponse(url, json, body, { lessonId, own: this.__yktOwnSubmission === true });
+          observeResponse(url, json, body, { lessonId, accountId, own: this.__yktOwnSubmission === true });
         } catch {}
       }, { once: true });
       return nativeSend.apply(this, arguments);

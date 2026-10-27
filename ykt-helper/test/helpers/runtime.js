@@ -14,6 +14,7 @@ mountSettingsPanel, mountAIPanel, showAIPanel, askAIFusionMode, mountProblemList
 recognizeCurrentSlideText, translateCurrentOCRText, ensureStaticReportPresentation, updatePresentationList,
 installXHRInterceptor, installFetchInterceptor, installWSInterceptor, connectOrAttachLessonWS,
 installRuntimeRouteWatcher, bootCurrentRuntime, createDanmuFollowTracker, createDanmuFollowController, sendDanmuText,
+mountQuickAnswerControl, refreshQuickAnswerControl, openQuickAnswer,
 hooks(o) { if(o.capture) captureSlideImage=o.capture; if(o.fallback) captureProblemForVision=o.fallback; if(o.vision) queryAIVision=o.vision; if(o.ocr) queryOCRVision=o.ocr; if(o.translate) queryTranslationText=o.translate; if(o.lessons)getOnLesson=o.lessons; }
 };})();`;
 export const plain = value => JSON.parse(JSON.stringify(value));
@@ -73,3 +74,4 @@ export function environment(t, config = {}, options = {}) {
     return ctx.problems.get(id);
   } };
 }
+

@@ -10,6 +10,7 @@ import * as PresPanel from './panels/presentation.js';
 import * as ProbListPanel from './panels/problem-list.js';
 import * as ActivePanel from './panels/active-problems.js';
 import * as TutorialPanel from './panels/tutorial.js';
+import * as QuickAnswer from './quick-answer.js';
 import { PROBLEM_TYPE_MAP } from '../core/types.js'
 import { getReminderChannels, getReminderVolume, isReminderEnabled } from '../core/reminder-preferences.js';
 
@@ -98,6 +99,7 @@ export const ui = {
   askAIForCurrent: AIPanel.askAIForCurrent,
   updateProblemList: ProbListPanel.updateProblemList,
   updateActiveProblems: ActivePanel.updateActiveProblems,
+  refreshQuickAnswerControl: QuickAnswer.refreshQuickAnswerControl,
 
   // 提升面板层级的辅助函数
   _bringToFront(panelElement) {
@@ -158,6 +160,7 @@ export const ui = {
     ProbListPanel.mountProblemListPanel();
     ActivePanel.mountActiveProblemsPanel();
     TutorialPanel.mountTutorialPanel(); 
+    QuickAnswer.mountQuickAnswerControl();
 
   },
 
@@ -417,3 +420,4 @@ export const ui = {
     el.title = _config.autoAnswerPaused ? '自动作答已暂停，点击恢复' : '自动作答';
   },
 };
+

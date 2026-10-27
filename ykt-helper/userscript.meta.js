@@ -4,7 +4,7 @@ export const meta = `
 // ==UserScript==
 // @name         AI雨课堂助手（JS版）
 // @namespace    https://github.com/ZaytsevZY/yuketang-helper-auto
-// @version      1.22.0
+// @version      1.22.1
 // @homepageURL  https://github.com/Frank-678/yuketang-helper-auto
 // @downloadURL  https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper.user.js
 // @updateURL    https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/main/release/ykt-helper.user.js
@@ -46,3 +46,4 @@ export const meta = `
 // @run-at       document-start
 // ==/UserScript==
 `;
+

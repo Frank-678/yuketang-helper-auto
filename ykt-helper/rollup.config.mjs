@@ -6,8 +6,8 @@ import terser from '@rollup/plugin-terser';
 import { meta } from './userscript.meta.js';
 
 /** 产物文件名 */
-export const OUT_FILE = 'dist/ykt-helper-1220.user.js';
-export const SCRIPT_VERSION = '1.22.0';
+export const OUT_FILE = 'dist/ykt-helper-1221.user.js';
+export const SCRIPT_VERSION = '1.22.1';
 
 export default {
   input: 'src/index.js',
@@ -71,3 +71,4 @@ export default {
     moduleSideEffects: true  // 保持模块副作用，避免过度摇树
   }
 };
+

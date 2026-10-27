@@ -15,6 +15,22 @@
 }
 
 /* ===== 工具栏 ===== */
+.ykt-force-answer-button{
+  padding: 7px 12px; border: 1px solid var(--ykt-accent); border-radius: 6px;
+  background: #fff; color: var(--ykt-accent); cursor: pointer;
+}
+#ykt-page-answer-control{ position: fixed; right: 16px; top: 42%; z-index: calc(var(--ykt-z) + 1); }
+#ykt-quick-answer-panel{ width: 380px; max-width: calc(100vw - 24px); right: 12px; }
+#ykt-quick-answer-panel .ykt-quick-question{ max-height: 100px; overflow: auto; white-space: pre-wrap; }
+#ykt-quick-answer-panel .ykt-quick-fields{ display: grid; gap: 10px; }
+#ykt-quick-answer-panel label{ display: grid; gap: 4px; }
+#ykt-quick-answer-panel textarea{ box-sizing: border-box; width: 100%; min-height: 44px; padding: 8px; border: 1px solid var(--ykt-border-strong); border-radius: 5px; resize: vertical; font: inherit; }
+#ykt-quick-answer-panel .ykt-quick-hint{ color: var(--ykt-muted); font-size: 12px; }
+#ykt-quick-answer-panel .ykt-quick-status{ white-space: pre-wrap; }
+#ykt-quick-answer-panel .ykt-quick-actions{ display: flex; justify-content: flex-end; gap: 8px; }
+#ykt-quick-answer-panel button{ padding: 7px 12px; cursor: pointer; }
+#ykt-quick-answer-panel .ykt-quick-submit{ background: var(--ykt-accent); color: #fff; border: 1px solid var(--ykt-accent); border-radius: 5px; }
+#ykt-quick-answer-panel button:disabled{ opacity: .6; cursor: wait; }
 #ykt-helper-toolbar{
   position: fixed; z-index: calc(var(--ykt-z) + 1);
   left: 15px; bottom: 15px;
@@ -556,3 +572,4 @@
 #ykt-ai-answer.tex-enabled svg { vertical-align: middle; }
 #ykt-ai-answer.tex-enabled .MathJax { line-height: 1; }
 #ykt-ai-answer .mjx-svg { color: currentColor; }
+
