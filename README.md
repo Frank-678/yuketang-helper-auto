@@ -4,11 +4,13 @@
 
 当前分支：**`feat/dynamic-qr-checkin`**，测试版本 **1.22.2-beta.5**。源码入口为 `ykt-helper/src/index.js`。
 
-本分支新增动态码课堂免扫码签到。协议依据、已实现功能和验证边界见 [动态码实施记录](docs/dynamic-qr-checkin.md)。
+本分支实验性接入动态码课堂的客户端签到通道。**最新现场结果：课堂列表已恢复，签到仍返回 50000，尚未修复成功。** 协议依据、已实现功能和验证边界见 [动态码实施记录](docs/dynamic-qr-checkin.md)。
 
 beta.5 修复“刷新正在上课的课堂”误显示为空：列表读取补带网页鉴权，接口失败直接显示错误；专用上课列表不再因缺少 status 字段而丢失记录。刷新显示进度、支持超时与重试，诊断记录接口状态和课程数量，不记录课程名称或凭据。
 
-beta.4 针对“sessionid 已读取、签到仍返回 50000”的后续反馈，按实际签到接口路径读取同站 Cookie，保留 sessionid_sign 等配套字段，并携带网页已有 Authorization。GM 请求使用管理器读取的 Cookie 快照，网页重试继续由浏览器携带 Cookie；凭据不进入诊断。真实课堂仍待复测。
+2026-11-18 16:06（北京时间）的 beta.5 日志中，列表两次成功返回 1 个课堂；5 次签到均在 GM 请求及网页重试后返回 50000。当时已读取 sessionid、CSRF 和网页 Authorization。继续补齐相同字段或重复网页登录，尚无已验证的恢复依据。
+
+beta.4 针对“sessionid 已读取、签到仍返回 50000”的后续反馈，按实际签到接口路径读取同站 Cookie，保留 sessionid_sign 等配套字段，并携带网页已有 Authorization。GM 请求使用管理器读取的 Cookie 快照，网页重试继续由浏览器携带 Cookie；凭据不进入诊断。
 
 beta.3 针对“本人资料能读取、签到仍返回 50000”的实测反馈，补充当前站点会话凭据桥接，并在明确鉴权拒绝后用网页登录态重试一次。两种请求都失败时保留实际错误，不再直接断言网页登录失效。当前仍待实机签到验收。
 
@@ -32,7 +34,9 @@ beta.2 修复已登录网页缺少 `user_id` Cookie 时无法识别账号的问�
 
 Tampermonkey 用户先检查：管理面板 → 设置 → `Config Mode` 设为 `Advanced` → `Security` → `Allow scripts to access cookies` 设为 `All`，保存后刷新课堂页，再点“立即签到”。维护者说明正式版默认只返回非 HttpOnly Cookie，这个选项可开放读取：[官方说明](https://github.com/Tampermonkey/tampermonkey/issues/465)。该设置影响已获得 Cookie 权限的脚本。
 
-先看新诊断中的 `sessionHeaderAvailable` 是否为 `true`，再看签到接口实际结果。它为 true 只说明会话头已补齐，不等于签到已成功。后续实测已确认 beta.3 在权限开放后能读取 sessionid，但仍返回 50000；这种情况使用 beta.4 的凭据封装修正继续验证。新版还记录 `signedSessionAvailable`、`authorizationAvailable` 和 Cookie 数量，不记录其值。如果选项不存在或已经设为 All 仍读不到会话，需进一步核查脚本管理器名称/版本及 Cookie 路径、分区。无需提供 Cookie 值。
+先看新诊断中的 `sessionHeaderAvailable` 是否为 `true`，再看签到接口实际结果。它为 true 只说明会话头已补齐，不等于签到已成功。beta.5 实测已确认读取 sessionid 后仍返回 50000，已完成上述设置的环境无需重复调整。新版还记录 `signedSessionAvailable`、`authorizationAvailable` 和 Cookie 数量，不记录其值；未读到签名 Cookie 也不能单独证明签名缺失就是失败原因。如果选项不存在或已经设为 All 仍读不到会话，需进一步核查脚本管理器名称/版本及 Cookie 路径、分区。无需提供 Cookie 值。
+
+“使用旁听入口，由服务器匹配在册身份”目前是待验证的路径。已找到公开实现使用课堂暗号调用另一入班接口，但这不能证明它适用于动态码课堂，或入班后一定记为正式签到；当前脚本尚未实现该路径。具体证据和验证条件见实施记录。
 
 ## 答案与提交
 
