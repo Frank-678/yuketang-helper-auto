@@ -4,7 +4,8 @@ import { actions } from '../../state/actions.js';
 import { getOnLesson } from '../../net/xhr-interceptor.js';
 import { getLessonCheckinState } from '../../net/checkin-client.js';
 
-let root, list, channel, autoJoin, summary, lessons = [], listedAccount = null, loading = false;
+let root, list, channel, autoJoin, summary, refreshButton, lessons = [], listedAccount = null, activeLoad = null;
+let listPhase = 'idle', listError = '';
 const create = (tag, text, cls) => { const el = document.createElement(tag); if (text != null) el.textContent = text; if (cls) el.className = cls; return el; };
 
 export function mountCheckinPanel() {
@@ -19,10 +20,10 @@ export function mountCheckinPanel() {
   autoJoin = create('input'); autoJoin.type = 'checkbox'; autoJoin.id = 'ykt-checkin-auto';
   autoJoin.onchange = () => { ui.config.autoJoinEnabled = autoJoin.checked; ui.saveConfig(); autoJoin.checked = !!ui.config.autoJoinEnabled; };
   autoLabel.append(autoJoin, document.createTextNode(' 开课后自动签到并进入课堂'));
-  const refresh = create('button', '刷新正在上课的课堂'); refresh.type = 'button'; refresh.id = 'ykt-checkin-refresh'; refresh.onclick = loadLiveLessons;
+  refreshButton = create('button', '刷新正在上课的课堂'); refreshButton.type = 'button'; refreshButton.id = 'ykt-checkin-refresh'; refreshButton.onclick = loadLiveLessons;
   summary = create('p', ''); summary.setAttribute('role', 'status');
   list = create('div'); list.id = 'ykt-checkin-list';
-  body.append(label, autoLabel, refresh, summary, list); root.append(header, body); document.body.appendChild(root);
+  body.append(label, autoLabel, refreshButton, summary, list); root.append(header, body); document.body.appendChild(root);
   window.addEventListener('ykt:checkin-changed', () => { if (root.classList.contains('visible')) renderCheckinList(); });
   window.addEventListener('ykt:lesson-change', () => { if (root.classList.contains('visible')) renderCheckinList(); });
   window.addEventListener('ykt:config-changed', () => { channel.checked = !!ui.config.dynamicQrCheckin; autoJoin.checked = !!ui.config.autoJoinEnabled; });
@@ -32,19 +33,25 @@ export function mountCheckinPanel() {
 
 export function renderCheckinList() {
   if (!root) return;
-  if (listedAccount !== repo.accountId) { lessons = []; listedAccount = repo.accountId; summary.textContent = ''; }
+  if (listedAccount !== repo.accountId) {
+    const previous = activeLoad; activeLoad = null; previous?.controller.abort();
+    lessons = []; listedAccount = repo.accountId; listPhase = 'idle'; listError = '';
+  }
+  refreshButton.disabled = listPhase === 'loading';
+  refreshButton.textContent = listPhase === 'loading' ? '正在刷新课堂…' : '刷新正在上课的课堂';
+  summary.textContent = listPhase === 'loading' ? '正在读取课堂列表…' : listPhase === 'error' ? `课堂列表读取失败：${listError}` : listPhase === 'loaded' ? lessons.length ? `已读取 ${lessons.length} 个正在上课的课堂，选择课堂即可签到。` : '课堂列表读取成功：当前没有正在上课的课堂。' : '尚未读取正在上课的课堂。';
   channel.checked = !!ui.config.dynamicQrCheckin;
   autoJoin.checked = !!ui.config.autoJoinEnabled;
   const all = new Map();
   if (repo.currentLessonId) all.set(String(repo.currentLessonId), { title: '当前课堂', lessonId: repo.currentLessonId });
   for (const lesson of lessons) {
     const id = String(lesson.lessonId ?? lesson.lesson_id ?? lesson.id ?? '');
-    if (id && Number(lesson.status) === 1) all.set(id, lesson);
+    if (id) all.set(id, lesson);
   }
   list.replaceChildren();
   for (const [id, lesson] of all) {
     const state = getLessonCheckinState(id), row = create('div', null, 'checkin-row'); row.dataset.lessonId = id;
-    const title = create('div', lesson.courseName || lesson.classroomName || lesson.title || `课堂 ${id}`, 'checkin-title');
+    const title = create('div', lesson.courseName || lesson.classroomName || lesson.name || lesson.title || `课堂 ${id}`, 'checkin-title');
     const status = create('p', ({ idle: '尚未签到', identifying: '正在识别当前登录账号…', preparing: '正在读取签到登录态…', signing: '正在签到…', confirmed: '服务器已确认签到', refused: '动态码通道被服务器拒绝', unknown: '签到结果待核实', failed: '签到失败', cancelled: '签到已停止' })[state.phase] || state.phase, 'checkin-status');
     const connection = repo.isLessonConnected(id);
     const detail = create('p', state.lastError || (state.phase === 'confirmed' ? `${state.channel === 'app' ? '客户端' : '普通'}通道 · ${connection?.readyState === 1 ? '课堂连接已建立' : connection?.readyState === 0 ? '正在连接课堂' : '等待课堂连接'}` : ''), 'checkin-detail');
@@ -57,19 +64,24 @@ export function renderCheckinList() {
     };
     row.append(title, status, detail, button); list.appendChild(row);
   }
-  if (!all.size) list.appendChild(create('p', '暂无正在上课的课堂。可在老师开课后刷新。'));
+  if (!all.size) list.appendChild(create('p', listPhase === 'loaded' ? '暂无正在上课的课堂。可在老师开课后刷新。' : listPhase === 'error' ? '课堂列表未能读取，请重试。' : '等待课堂列表读取结果。'));
 }
 
 async function loadLiveLessons() {
-  if (loading) return; loading = true;
-  const account = repo.accountId; summary.textContent = '正在读取课堂列表…';
+  const account = repo.accountId;
+  if (activeLoad?.account === account) return;
+  activeLoad?.controller.abort();
+  if (listedAccount !== account) { lessons = []; listedAccount = account; }
+  const task = { account, controller: new AbortController() }; activeLoad = task;
+  listPhase = 'loading'; listError = ''; renderCheckinList();
   try {
-    const found = await getOnLesson();
-    if (repo.accountId !== account) return;
-    lessons = found; listedAccount = account; summary.textContent = found.length ? '选择课堂即可签到。' : '当前未发现正在上课的课堂。';
+    const found = await getOnLesson({ signal: task.controller.signal });
+    if (repo.accountId !== account || activeLoad !== task) return;
+    lessons = found; listPhase = 'loaded';
     renderCheckinList();
-  } catch (error) { if (repo.accountId === account) summary.textContent = error.message; }
-  finally { loading = false; }
+  } catch (error) {
+    if (repo.accountId === account && activeLoad === task) { lessons = []; listPhase = 'error'; listError = error.message; renderCheckinList(); }
+  } finally { if (activeLoad === task) { activeLoad = null; renderCheckinList(); } }
 }
 
 export function showCheckinPanel(visible = true) {

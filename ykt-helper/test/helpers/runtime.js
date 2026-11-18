@@ -15,7 +15,7 @@ recognizeCurrentSlideText, translateCurrentOCRText, ensureStaticReportPresentati
 installXHRInterceptor, installFetchInterceptor, installWSInterceptor, connectOrAttachLessonWS,
 installRuntimeRouteWatcher, bootCurrentRuntime, createDanmuFollowTracker, createDanmuFollowController, sendDanmuText,
 mountQuickAnswerControl, refreshQuickAnswerControl, openQuickAnswer,
-requestLessonCheckin, getLessonCheckinState, resolveCheckinSession, showCheckinPanel, renderCheckinList, exportDiagnostics,
+requestLessonCheckin, getLessonCheckinState, resolveCheckinSession, getOnLesson, showCheckinPanel, renderCheckinList, exportDiagnostics,
 hooks(o) { if(o.capture) captureSlideImage=o.capture; if(o.fallback) captureProblemForVision=o.fallback; if(o.vision) queryAIVision=o.vision; if(o.ocr) queryOCRVision=o.ocr; if(o.translate) queryTranslationText=o.translate; if(o.lessons)getOnLesson=o.lessons; }
 };})();`;
 export const plain = value => JSON.parse(JSON.stringify(value));

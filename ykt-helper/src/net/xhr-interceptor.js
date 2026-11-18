@@ -28,73 +28,7 @@ export function installXHRInterceptor() {
   }
 }
 
-export async function getOnLesson() {
-  const origin = location.origin;
-  const same = (p) => new URL(p, origin).toString();
-  const candidates = [
-    same('/api/v3/classroom/on-lesson'),
-    same('/mooc-api/v1/lms/classroom/on-lesson'),
-    same('/apiv3/classroom/on-lesson'),
-  ];
-
-  const tries = [];
-  let finalList = [];
-  let lastErr = null;
-
-  for (const url of candidates) {
-    const item = { url, ok: false, status: 0, note: '' };
-    try {
-      const r = await fetch(url, { credentials: 'include' });
-      item.status = r.status;
-      if (!r.ok) {
-        item.note = `HTTP ${r.status}`;
-        tries.push(item);
-        continue;
-      }
-      const text = await r.text();
-      // 打个缩略，避免把整段 JSON 打爆
-      item.bodySnippet = text.slice(0, 300);
-      let j = {};
-      try { j = JSON.parse(text); } catch (_) { item.note = 'JSON parse failed'; }
-      const list = j?.data?.onLessonClassrooms || j?.result || j?.data || [];
-      item.parsedLength = Array.isArray(list) ? list.length : -1;
-      if (Array.isArray(list) && list.length) {
-        item.ok = true;
-        tries.push(item);
-        finalList = list;
-        break;
-      } else {
-        item.note ||= 'empty list';
-        tries.push(item);
-      }
-    } catch (e) {
-      item.note = (e && e.message) || 'fetch error';
-      tries.push(item);
-      lastErr = e;
-    }
-  }
-
-  // 调试信息
-  try {
-    console.groupCollapsed(
-      `%c[getOnLesson] host=%s  result=%s  candidates=%d`,
-      'color:#09f',
-      location.hostname,
-      finalList.length ? `OK(${finalList.length})` : 'EMPTY',
-      candidates.length
-    );
-      tries.forEach((t, i) => {
-      console.log(
-        `#${i+1}`,
-        { url: t.url, ok: t.ok, status: t.status, note: t.note, parsedLength: t.parsedLength, bodySnippet: t.bodySnippet }
-      );
-    });
-    if (!finalList.length && lastErr) console.warn('[getOnLesson] last error:', lastErr);
-    console.groupEnd();
-  } catch {}
-
-  return finalList;
-}
+export { getOnLesson } from './live-lessons.js';
 
 // One explicit protocol per channel, on the authenticated current host.
 export { requestLessonCheckin as checkinClass } from './checkin-client.js';

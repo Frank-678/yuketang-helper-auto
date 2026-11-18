@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI雨课堂助手（JS版）
 // @namespace    https://github.com/ZaytsevZY/yuketang-helper-auto
-// @version      1.22.2-beta.4
+// @version      1.22.2-beta.5
 // @homepageURL  https://github.com/Frank-678/yuketang-helper-auto
 // @downloadURL  https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
 // @updateURL    https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
@@ -1419,7 +1419,7 @@
     });
     root$5.querySelector("#ykt-btn-export-diag")?.addEventListener("click", () => {
       downloadDiagnostics({
-        version: "1.22.2-beta.4",
+        version: "1.22.2-beta.5",
         autoAnswer: !!ui.config.autoAnswer,
         autoJoin: !!ui.config.autoJoinEnabled
       });
@@ -4772,6 +4772,214 @@
       lessonId: lessonId
     });
   }
+  class LiveLessonsError extends Error {
+    constructor(message, {code: code = null, status: status = 0, reason: reason = "invalid-list"} = {}) {
+      super(message);
+      this.name = "LiveLessonsError";
+      this.code = code;
+      this.status = status;
+      this.reason = reason;
+    }
+  }
+  function checkEnvelope(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new LiveLessonsError("课堂列表响应格式无效");
+    if (value.success === false || value.code != null && !([ "number", "string" ].includes(typeof value.code) && String(value.code).trim() === "0")) {
+      const code = [ "number", "string" ].includes(typeof value.code) && String(value.code).trim() !== "" ? Number(value.code) : null;
+      const numeric = Number.isFinite(code) ? code : null;
+      const reason = [ 5e4, 401, 403 ].includes(numeric) ? "课堂列表接口未通过登录态校验" : "课堂列表接口返回失败";
+      throw new LiveLessonsError(`${reason}${numeric == null ? "" : `（${numeric}）`}`, {
+        code: numeric,
+        reason: "business-error"
+      });
+    }
+  }
+  function parseLiveLessonResponse(body) {
+    let json;
+    try {
+      json = typeof body === "string" ? JSON.parse(body.replace(/("(?:lessonId|lesson_id|id)"\s*:\s*)(\d{16,})(?=\s*[,}])/g, '$1"$2"')) : body;
+    } catch {
+      throw new LiveLessonsError("课堂列表响应不是有效 JSON", {
+        reason: "invalid-json"
+      });
+    }
+    checkEnvelope(json);
+    if (json.code == null && json.success !== true) throw new LiveLessonsError("服务器未确认课堂列表读取成功");
+    const data = json.data ?? json.result ?? json;
+    if (!Array.isArray(data)) checkEnvelope(data);
+    const list = Array.isArray(data) ? data : data.onLessonClassrooms;
+    if (!Array.isArray(list)) throw new LiveLessonsError("课堂列表响应缺少 onLessonClassrooms 数组");
+    const lessons = new Map;
+    for (const raw of list) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const value = raw.lessonId ?? raw.lesson_id ?? raw.id;
+      if (![ "string", "number" ].includes(typeof value) || typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) continue;
+      const id = String(value).trim();
+      if (id === "0" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) continue;
+      // This endpoint already means "currently on lesson". Its items need not
+      // have a status field; do not reinterpret another classroom status here.
+            lessons.set(id, {
+        ...raw,
+        lessonId: id,
+        status: 1
+      });
+    }
+    if (list.length && !lessons.size) throw new LiveLessonsError("服务器返回了课堂记录，但未识别到有效课堂编号");
+    return [ ...lessons.values() ];
+  }
+  const valid = value => typeof value === "string" && value.length > 0 && value.length < 8192 && !/[\r\n;\0]/.test(value);
+  const validName = name => typeof name === "string" && /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
+  function normalizeSiteAuthorization(value) {
+    if (typeof value !== "string") return "";
+    const token = value.trim().replace(/^Bearer(?:\s+|$)/i, "");
+    if (!token || /^(?:null|undefined)$/i.test(token) || token.length > 65536 || /[^\x21-\x7e]/.test(token)) return "";
+    return `Bearer ${token}`;
+  }
+  function selectCheckinSession(origin, visibleCookie = "", cookies = []) {
+    const target = new URL("/api/v3/lesson/checkin", origin);
+    const values = readCheckinCookies(visibleCookie), rows = [];
+    for (const row of Array.isArray(cookies) ? cookies : []) {
+      if (!validName(row?.name) || !valid(row.value)) continue;
+      const domain = String(row.domain || target.hostname).replace(/^\./, "").toLowerCase();
+      if (row.hostOnly ? domain !== target.hostname : target.hostname !== domain && !target.hostname.endsWith(`.${domain}`)) continue;
+      const path = row.path || "/";
+      if (target.pathname !== path && !(target.pathname.startsWith(path) && (path.endsWith("/") || target.pathname[path.length] === "/"))) continue;
+      if (row.expirationDate != null && row.expirationDate * 1e3 <= Date.now()) continue;
+      if (row.partitionKey?.topLevelSite) try {
+        const site = new URL(row.partitionKey.topLevelSite);
+        if (site.protocol !== "https:" || ![ "yuketang.cn", target.hostname ].includes(site.hostname)) continue;
+      } catch {
+        continue;
+      }
+      rows.push(row);
+    }
+    // Like a browser Cookie header, put more specific paths first and retain
+    // applicable companion cookies rather than guessing an authentication list.
+        rows.sort((a, b) => (b.path || "/").length - (a.path || "/").length);
+    const selected = new Map;
+    for (const row of rows) if (!selected.has(row.name)) selected.set(row.name, row);
+    for (const name of [ "sessionid", "csrftoken" ]) {
+      if (selected.has(name)) values[name] = selected.get(name).value;
+      if (!valid(values[name])) delete values[name];
+    }
+    return {
+      sessionid: values.sessionid || "",
+      csrftoken: values.csrftoken || "",
+      // Only an endpoint-scoped manager snapshot that includes the session may
+      // be sent explicitly; document.cookie alone is never treated as complete.
+      cookie: selected.has("sessionid") ? rows.map(row => `${row.name}=${row.value}`).join("; ") : "",
+      source: selected.has("sessionid") ? "gm-cookie" : values.sessionid ? "document" : "jar-only",
+      signedSessionAvailable: selected.has("sessionid_sign"),
+      cookieCount: rows.length,
+      httpOnlyCookieCount: rows.filter(row => row.httpOnly).length
+    };
+  }
+  const PATHS = [ "/api/v3/classroom/on-lesson", "/mooc-api/v1/lms/classroom/on-lesson", "/apiv3/classroom/on-lesson" ];
+  async function getOnLesson({timeout: timeout = 8e3, signal: signal} = {}) {
+    const origin = new URL(location.origin);
+    if (origin.protocol !== "https:" || !/^(www|pro|changjiang|huanghe)\.yuketang\.cn$/.test(origin.hostname) || origin.port) throw new LiveLessonsError("当前地址不是支持的雨课堂站点");
+    const account = repo.accountId, controller = new AbortController;
+    let stopped, rejectStop, timer;
+    const stopPromise = new Promise((_, reject) => {
+      rejectStop = reject;
+    });
+    const check = () => {
+      if (stopped) throw stopped;
+      if (repo.accountId !== account) throw new LiveLessonsError("账号已变化，旧课堂列表已丢弃", {
+        reason: "account-changed"
+      });
+    };
+    const stop = error => {
+      stopped = error;
+      controller.abort();
+      rejectStop(error);
+    };
+    const cancel = () => stop(new LiveLessonsError("课堂列表读取已取消", {
+      reason: "cancelled"
+    }));
+    const headers = {
+      Accept: "application/json",
+      xtbz: "ykt",
+      "x-client": "h5"
+    };
+    try {
+      const authorization = normalizeSiteAuthorization(localStorage.getItem("Authorization"));
+      if (authorization) headers.Authorization = authorization;
+    } catch {}
+    const work = async () => {
+      let lastError;
+      for (const path of PATHS) {
+        check();
+        let status = 0;
+        try {
+          diag("live-lessons-start", {
+            endpoint: path,
+            authorizationAvailable: !!headers.Authorization
+          });
+          const response = await fetch(new URL(path, origin).href, {
+            credentials: "include",
+            cache: "no-store",
+            redirect: "error",
+            headers: headers,
+            signal: controller.signal
+          });
+          status = response.status;
+          check();
+          if (response.url && new URL(response.url, origin).origin !== origin.origin) throw new LiveLessonsError("课堂列表响应跳转到了其他站点", {
+            reason: "redirect"
+          });
+          if (!(status >= 200 && status < 300)) throw new LiveLessonsError(`课堂列表读取失败：HTTP ${status}`, {
+            status: status,
+            reason: "http-error"
+          });
+          const body = await response.text();
+          check();
+          const lessons = parseLiveLessonResponse(body);
+          diag("live-lessons-loaded", {
+            endpoint: path,
+            httpStatus: status,
+            count: lessons.length
+          });
+          return lessons;
+        } catch (error) {
+          check();
+          const safe = error instanceof LiveLessonsError ? error : new LiveLessonsError("课堂列表网络请求失败，请重试", {
+            reason: "network"
+          });
+          diag("live-lessons-failed", {
+            endpoint: path,
+            httpStatus: status,
+            code: safe.code,
+            reason: safe.reason
+          });
+          lastError = safe;
+          // Legacy aliases are only for a missing endpoint. A business error,
+          // a valid empty result, or an unreadable response is not an empty list.
+                    if (![ 404, 405 ].includes(safe.status)) throw safe;
+        }
+      }
+      throw lastError;
+    };
+    try {
+      if (signal?.aborted) throw new LiveLessonsError("课堂列表读取已取消", {
+        reason: "cancelled"
+      });
+      signal?.addEventListener("abort", cancel, {
+        once: true
+      });
+      timer = setTimeout(() => stop(new LiveLessonsError("课堂列表读取超时，请重试", {
+        reason: "timeout"
+      })), Math.max(1, Math.min(3e4, Number(timeout) || 8e3)));
+      return await Promise.race([ work(), stopPromise ]);
+    } catch (error) {
+      if (error instanceof LiveLessonsError && [ "timeout", "cancelled", "account-changed" ].includes(error.reason)) diag("live-lessons-failed", {
+        reason: error.reason
+      });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+    }
+  }
   // Current-user paths verified in the public 3.0 client's profile lookup.
     const PROFILE_PATHS = [ "/v/course_meta/user_info", "/api/v3/user/profile", "/v2/api/web/userinfo" ];
   async function resolveCurrentUserIdentity({timeout: timeout = 6e3, signal: signal, guard: guard}) {
@@ -4858,53 +5066,6 @@
       clearTimeout(timer);
       signal?.removeEventListener("abort", cancel);
     }
-  }
-  const valid = value => typeof value === "string" && value.length > 0 && value.length < 8192 && !/[\r\n;\0]/.test(value);
-  const validName = name => typeof name === "string" && /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
-  function normalizeSiteAuthorization(value) {
-    if (typeof value !== "string") return "";
-    const token = value.trim().replace(/^Bearer(?:\s+|$)/i, "");
-    if (!token || /^(?:null|undefined)$/i.test(token) || token.length > 65536 || /[^\x21-\x7e]/.test(token)) return "";
-    return `Bearer ${token}`;
-  }
-  function selectCheckinSession(origin, visibleCookie = "", cookies = []) {
-    const target = new URL("/api/v3/lesson/checkin", origin);
-    const values = readCheckinCookies(visibleCookie), rows = [];
-    for (const row of Array.isArray(cookies) ? cookies : []) {
-      if (!validName(row?.name) || !valid(row.value)) continue;
-      const domain = String(row.domain || target.hostname).replace(/^\./, "").toLowerCase();
-      if (row.hostOnly ? domain !== target.hostname : target.hostname !== domain && !target.hostname.endsWith(`.${domain}`)) continue;
-      const path = row.path || "/";
-      if (target.pathname !== path && !(target.pathname.startsWith(path) && (path.endsWith("/") || target.pathname[path.length] === "/"))) continue;
-      if (row.expirationDate != null && row.expirationDate * 1e3 <= Date.now()) continue;
-      if (row.partitionKey?.topLevelSite) try {
-        const site = new URL(row.partitionKey.topLevelSite);
-        if (site.protocol !== "https:" || ![ "yuketang.cn", target.hostname ].includes(site.hostname)) continue;
-      } catch {
-        continue;
-      }
-      rows.push(row);
-    }
-    // Like a browser Cookie header, put more specific paths first and retain
-    // applicable companion cookies rather than guessing an authentication list.
-        rows.sort((a, b) => (b.path || "/").length - (a.path || "/").length);
-    const selected = new Map;
-    for (const row of rows) if (!selected.has(row.name)) selected.set(row.name, row);
-    for (const name of [ "sessionid", "csrftoken" ]) {
-      if (selected.has(name)) values[name] = selected.get(name).value;
-      if (!valid(values[name])) delete values[name];
-    }
-    return {
-      sessionid: values.sessionid || "",
-      csrftoken: values.csrftoken || "",
-      // Only an endpoint-scoped manager snapshot that includes the session may
-      // be sent explicitly; document.cookie alone is never treated as complete.
-      cookie: selected.has("sessionid") ? rows.map(row => `${row.name}=${row.value}`).join("; ") : "",
-      source: selected.has("sessionid") ? "gm-cookie" : values.sessionid ? "document" : "jar-only",
-      signedSessionAvailable: selected.has("sessionid_sign"),
-      cookieCount: rows.length,
-      httpOnlyCookieCount: rows.filter(row => row.httpOnly).length
-    };
   }
   function resolveCheckinSession({timeout: timeout = 1500, signal: signal, guard: guard}) {
     guard();
@@ -5378,75 +5539,8 @@
       proto.__yktInstalled = true;
     }
   }
-  async function getOnLesson() {
-    const origin = location.origin;
-    const same = p => new URL(p, origin).toString();
-    const candidates = [ same("/api/v3/classroom/on-lesson"), same("/mooc-api/v1/lms/classroom/on-lesson"), same("/apiv3/classroom/on-lesson") ];
-    const tries = [];
-    let finalList = [];
-    let lastErr = null;
-    for (const url of candidates) {
-      const item = {
-        url: url,
-        ok: false,
-        status: 0,
-        note: ""
-      };
-      try {
-        const r = await fetch(url, {
-          credentials: "include"
-        });
-        item.status = r.status;
-        if (!r.ok) {
-          item.note = `HTTP ${r.status}`;
-          tries.push(item);
-          continue;
-        }
-        const text = await r.text();
-        // 打个缩略，避免把整段 JSON 打爆
-                item.bodySnippet = text.slice(0, 300);
-        let j = {};
-        try {
-          j = JSON.parse(text);
-        } catch (_) {
-          item.note = "JSON parse failed";
-        }
-        const list = j?.data?.onLessonClassrooms || j?.result || j?.data || [];
-        item.parsedLength = Array.isArray(list) ? list.length : -1;
-        if (Array.isArray(list) && list.length) {
-          item.ok = true;
-          tries.push(item);
-          finalList = list;
-          break;
-        } else {
-          item.note ||= "empty list";
-          tries.push(item);
-        }
-      } catch (e) {
-        item.note = e && e.message || "fetch error";
-        tries.push(item);
-        lastErr = e;
-      }
-    }
-    // 调试信息
-        try {
-      console.groupCollapsed(`%c[getOnLesson] host=%s  result=%s  candidates=%d`, "color:#09f", location.hostname, finalList.length ? `OK(${finalList.length})` : "EMPTY", candidates.length);
-      tries.forEach((t, i) => {
-        console.log(`#${i + 1}`, {
-          url: t.url,
-          ok: t.ok,
-          status: t.status,
-          note: t.note,
-          parsedLength: t.parsedLength,
-          bodySnippet: t.bodySnippet
-        });
-      });
-      if (!finalList.length && lastErr) console.warn("[getOnLesson] last error:", lastErr);
-      console.groupEnd();
-    } catch {}
-    return finalList;
-  }
-  let root, list, channel, autoJoin, summary, lessons = [], listedAccount = null, loading = false;
+  let root, list, channel, autoJoin, summary, refreshButton, lessons = [], listedAccount = null, activeLoad = null;
+  let listPhase = "idle", listError = "";
   const create = (tag, text, cls) => {
     const el = document.createElement(tag);
     if (text != null) el.textContent = text;
@@ -5482,15 +5576,15 @@
       autoJoin.checked = !!ui.config.autoJoinEnabled;
     };
     autoLabel.append(autoJoin, document.createTextNode(" 开课后自动签到并进入课堂"));
-    const refresh = create("button", "刷新正在上课的课堂");
-    refresh.type = "button";
-    refresh.id = "ykt-checkin-refresh";
-    refresh.onclick = loadLiveLessons;
+    refreshButton = create("button", "刷新正在上课的课堂");
+    refreshButton.type = "button";
+    refreshButton.id = "ykt-checkin-refresh";
+    refreshButton.onclick = loadLiveLessons;
     summary = create("p", "");
     summary.setAttribute("role", "status");
     list = create("div");
     list.id = "ykt-checkin-list";
-    body.append(label, autoLabel, refresh, summary, list);
+    body.append(label, autoLabel, refreshButton, summary, list);
     root.append(header, body);
     document.body.appendChild(root);
     window.addEventListener("ykt:checkin-changed", () => {
@@ -5511,10 +5605,17 @@
   function renderCheckinList() {
     if (!root) return;
     if (listedAccount !== repo.accountId) {
+      const previous = activeLoad;
+      activeLoad = null;
+      previous?.controller.abort();
       lessons = [];
       listedAccount = repo.accountId;
-      summary.textContent = "";
+      listPhase = "idle";
+      listError = "";
     }
+    refreshButton.disabled = listPhase === "loading";
+    refreshButton.textContent = listPhase === "loading" ? "正在刷新课堂…" : "刷新正在上课的课堂";
+    summary.textContent = listPhase === "loading" ? "正在读取课堂列表…" : listPhase === "error" ? `课堂列表读取失败：${listError}` : listPhase === "loaded" ? lessons.length ? `已读取 ${lessons.length} 个正在上课的课堂，选择课堂即可签到。` : "课堂列表读取成功：当前没有正在上课的课堂。" : "尚未读取正在上课的课堂。";
     channel.checked = !!ui.config.dynamicQrCheckin;
     autoJoin.checked = !!ui.config.autoJoinEnabled;
     const all = new Map;
@@ -5524,13 +5625,13 @@
     });
     for (const lesson of lessons) {
       const id = String(lesson.lessonId ?? lesson.lesson_id ?? lesson.id ?? "");
-      if (id && Number(lesson.status) === 1) all.set(id, lesson);
+      if (id) all.set(id, lesson);
     }
     list.replaceChildren();
     for (const [id, lesson] of all) {
       const state = getLessonCheckinState(id), row = create("div", null, "checkin-row");
       row.dataset.lessonId = id;
-      const title = create("div", lesson.courseName || lesson.classroomName || lesson.title || `课堂 ${id}`, "checkin-title");
+      const title = create("div", lesson.courseName || lesson.classroomName || lesson.name || lesson.title || `课堂 ${id}`, "checkin-title");
       const status = create("p", {
         idle: "尚未签到",
         identifying: "正在识别当前登录账号…",
@@ -5562,24 +5663,44 @@
       row.append(title, status, detail, button);
       list.appendChild(row);
     }
-    if (!all.size) list.appendChild(create("p", "暂无正在上课的课堂。可在老师开课后刷新。"));
+    if (!all.size) list.appendChild(create("p", listPhase === "loaded" ? "暂无正在上课的课堂。可在老师开课后刷新。" : listPhase === "error" ? "课堂列表未能读取，请重试。" : "等待课堂列表读取结果。"));
   }
   async function loadLiveLessons() {
-    if (loading) return;
-    loading = true;
     const account = repo.accountId;
-    summary.textContent = "正在读取课堂列表…";
-    try {
-      const found = await getOnLesson();
-      if (repo.accountId !== account) return;
-      lessons = found;
+    if (activeLoad?.account === account) return;
+    activeLoad?.controller.abort();
+    if (listedAccount !== account) {
+      lessons = [];
       listedAccount = account;
-      summary.textContent = found.length ? "选择课堂即可签到。" : "当前未发现正在上课的课堂。";
+    }
+    const task = {
+      account: account,
+      controller: new AbortController
+    };
+    activeLoad = task;
+    listPhase = "loading";
+    listError = "";
+    renderCheckinList();
+    try {
+      const found = await getOnLesson({
+        signal: task.controller.signal
+      });
+      if (repo.accountId !== account || activeLoad !== task) return;
+      lessons = found;
+      listPhase = "loaded";
       renderCheckinList();
     } catch (error) {
-      if (repo.accountId === account) summary.textContent = error.message;
+      if (repo.accountId === account && activeLoad === task) {
+        lessons = [];
+        listPhase = "error";
+        listError = error.message;
+        renderCheckinList();
+      }
     } finally {
-      loading = false;
+      if (activeLoad === task) {
+        activeLoad = null;
+        renderCheckinList();
+      }
     }
   }
   function showCheckinPanel(visible = true) {
@@ -7597,7 +7718,7 @@
     if (desktopStarted) return;
     desktopStarted = true;
     diag("boot", {
-      version: "1.22.2-beta.4",
+      version: "1.22.2-beta.5",
       readyState: INJECTED_READY_STATE,
       autoAnswer: !!ui.config.autoAnswer
     });
@@ -7605,10 +7726,10 @@
       // 控制台：__yktHelperDiag.download() 导出诊断日志
       (gm.uw || window).__yktHelperDiag = {
         dump: () => exportDiagnostics({
-          version: "1.22.2-beta.4"
+          version: "1.22.2-beta.5"
         }),
         download: () => downloadDiagnostics({
-          version: "1.22.2-beta.4"
+          version: "1.22.2-beta.5"
         }),
         clear: clearDiagnostics
       };
