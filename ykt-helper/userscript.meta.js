@@ -4,7 +4,7 @@ export const meta = `
 // ==UserScript==
 // @name         AI雨课堂助手（JS版）
 // @namespace    https://github.com/ZaytsevZY/yuketang-helper-auto
-// @version      1.22.2-beta.2
+// @version      1.22.2-beta.3
 // @homepageURL  https://github.com/Frank-678/yuketang-helper-auto
 // @downloadURL  https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
 // @updateURL    https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
@@ -39,6 +39,8 @@ export const meta = `
 // @grant        GM_addStyle
 // @grant        GM_notification
 // @grant        GM_xmlhttpRequest
+// @grant        GM_cookie
+// @grant        GM.cookie
 // @grant        GM_openInTab
 // @grant        GM_getTab
 // @grant        GM_getTabs

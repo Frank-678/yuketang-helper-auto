@@ -48,7 +48,7 @@ export function parseCheckinResponse({ status, body, headers = '', lessonId, cha
   if (!json || typeof json !== 'object' || !['number', 'string'].includes(typeof json.code) || String(json.code).trim() === '') throw new CheckinError('服务器未返回明确签到结果', { status, unknown: true });
   const code = Number(json.code);
   if (code !== 0) {
-    const reason = code === 50070 ? '服务器仍要求动态二维码验证' : code === 50000 || code === 401 ? '雨课堂登录已失效，请重新登录' : String(json.msg || json.message || '服务器拒绝签到').slice(0, 120);
+    const reason = code === 50070 ? '服务器仍要求动态二维码验证' : code === 50000 || code === 401 ? '签到请求未通过登录态校验' : String(json.msg || json.message || '服务器拒绝签到').slice(0, 120);
     throw new CheckinError(`${reason}（${json.code}）`, { code: Number.isFinite(code) ? code : String(json.code), status });
   }
   const data = json.data ?? json.result;

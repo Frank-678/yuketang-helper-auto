@@ -9,7 +9,7 @@ export function normalizeUserId(value) {
 
 function profileId(profile) {
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
-  for (const key of ['user_id', 'userId', 'uid', 'id']) {
+  for (const key of ['user_id', 'userId', 'id', 'uid']) {
     const id = normalizeUserId(profile[key]);
     if (id) return id;
   }

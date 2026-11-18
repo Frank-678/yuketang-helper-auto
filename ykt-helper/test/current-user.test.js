@@ -79,7 +79,7 @@ test('definite login expiry prevents posting checkin and is reported as an ident
   await assert.rejects(e.a.requestLessonCheckin('L1'), /登录已失效/);
   assert.equal(urls.length, 1); assert.equal(e.gmRequests.length, 0);
   const state = e.a.getLessonCheckinState('L1'); assert.equal(state.stage, 'identity'); assert.equal(state.code, 401); assert.equal(state.phase, 'failed');
-  assert.match(e.a.exportDiagnostics(), /"stage":"identity","requestSent":false/); assert.doesNotMatch(e.a.exportDiagnostics(), / checkin-start /);
+  assert.match(e.a.exportDiagnostics(), /"stage":"identity"[^\n]*"requestSent":false/); assert.doesNotMatch(e.a.exportDiagnostics(), / checkin-start /);
 });
 
 test('a successful profile without an ID does not fabricate identity or claim the user is logged out', async t => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI雨课堂助手（JS版）
 // @namespace    https://github.com/ZaytsevZY/yuketang-helper-auto
-// @version      1.22.2-beta.2
+// @version      1.22.2-beta.3
 // @homepageURL  https://github.com/Frank-678/yuketang-helper-auto
 // @downloadURL  https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
 // @updateURL    https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
@@ -36,6 +36,8 @@
 // @grant        GM_addStyle
 // @grant        GM_notification
 // @grant        GM_xmlhttpRequest
+// @grant        GM_cookie
+// @grant        GM.cookie
 // @grant        GM_openInTab
 // @grant        GM_getTab
 // @grant        GM_getTabs
@@ -484,7 +486,7 @@
     });
     const code = Number(json.code);
     if (code !== 0) {
-      const reason = code === 50070 ? "服务器仍要求动态二维码验证" : code === 5e4 || code === 401 ? "雨课堂登录已失效，请重新登录" : String(json.msg || json.message || "服务器拒绝签到").slice(0, 120);
+      const reason = code === 50070 ? "服务器仍要求动态二维码验证" : code === 5e4 || code === 401 ? "签到请求未通过登录态校验" : String(json.msg || json.message || "服务器拒绝签到").slice(0, 120);
       throw new CheckinError(`${reason}（${json.code}）`, {
         code: Number.isFinite(code) ? code : String(json.code),
         status: status
@@ -523,7 +525,7 @@
   }
   function profileId(profile) {
     if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
-    for (const key of [ "user_id", "userId", "uid", "id" ]) {
+    for (const key of [ "user_id", "userId", "id", "uid" ]) {
       const id = normalizeUserId(profile[key]);
       if (id) return id;
     }
@@ -1416,7 +1418,7 @@
     });
     root$5.querySelector("#ykt-btn-export-diag")?.addEventListener("click", () => {
       downloadDiagnostics({
-        version: "1.22.2-beta.2",
+        version: "1.22.2-beta.3",
         autoAnswer: !!ui.config.autoAnswer,
         autoJoin: !!ui.config.autoJoinEnabled
       });
@@ -4856,6 +4858,83 @@
       signal?.removeEventListener("abort", cancel);
     }
   }
+  const names = [ "sessionid", "csrftoken" ];
+  const valid = value => typeof value === "string" && value.length > 0 && value.length < 8192 && !/[\r\n;\0]/.test(value);
+  function selectCheckinSession(origin, visibleCookie = "", cookies = []) {
+    const target = new URL("/api/v3/lesson/checkin", origin);
+    const values = readCheckinCookies(visibleCookie), selected = {};
+    for (const row of Array.isArray(cookies) ? cookies : []) {
+      if (!names.includes(row?.name) || !valid(row.value)) continue;
+      const domain = String(row.domain || target.hostname).replace(/^\./, "").toLowerCase();
+      if (row.hostOnly ? domain !== target.hostname : target.hostname !== domain && !target.hostname.endsWith(`.${domain}`)) continue;
+      const path = row.path || "/";
+      if (target.pathname !== path && !(target.pathname.startsWith(path) && (path.endsWith("/") || target.pathname[path.length] === "/"))) continue;
+      if (row.expirationDate != null && row.expirationDate * 1e3 <= Date.now()) continue;
+      if (row.partitionKey?.topLevelSite) try {
+        const site = new URL(row.partitionKey.topLevelSite);
+        if (site.protocol !== "https:" || ![ "yuketang.cn", target.hostname ].includes(site.hostname)) continue;
+      } catch {
+        continue;
+      }
+      if (!selected[row.name] || path.length > (selected[row.name].path || "/").length) selected[row.name] = row;
+    }
+    for (const name of names) {
+      if (selected[name]) values[name] = selected[name].value;
+      if (!valid(values[name])) delete values[name];
+    }
+    return {
+      sessionid: values.sessionid || "",
+      csrftoken: values.csrftoken || "",
+      // Merge only the authentication cookies into the manager's complete jar.
+      cookie: names.filter(name => selected[name]).map(name => `${name}=${selected[name].value}`).join("; "),
+      source: selected.sessionid ? "gm-cookie" : values.sessionid ? "document" : "jar-only"
+    };
+  }
+  function resolveCheckinSession({timeout: timeout = 1500, signal: signal, guard: guard}) {
+    guard();
+    if (signal?.aborted) return Promise.reject(new CheckinError("读取签到登录态已取消"));
+    const callbackApi = window.GM_cookie, promiseApi = window.GM?.cookie;
+    const api = typeof callbackApi?.list === "function" ? callbackApi : typeof promiseApi?.list === "function" ? promiseApi : null;
+    const fallback = status => ({
+      ...selectCheckinSession(location.origin, document.cookie),
+      cookieApi: status
+    });
+    if (!api) return Promise.resolve(fallback("unavailable"));
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (rows, status, error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
+        try {
+          guard();
+          if (error) throw error;
+          resolve({
+            ...selectCheckinSession(location.origin, document.cookie, rows),
+            cookieApi: status
+          });
+        } catch (reason) {
+          reject(reason);
+        }
+      };
+      const cancel = () => finish([], "cancelled", new CheckinError("读取签到登录态已取消"));
+      const timer = setTimeout(() => finish([], "timeout"), timeout);
+      signal?.addEventListener("abort", cancel, {
+        once: true
+      });
+      try {
+        // Use the current matched page; the API checks the script's URL access.
+        const details = {
+          url: location.href
+        };
+        const result = api === callbackApi ? api.list(details, (rows, error) => finish(error ? [] : rows, error ? "denied" : "available")) : api.list(details);
+        if (result?.then) result.then(rows => finish(rows, "available"), () => finish([], "denied"));
+      } catch {
+        finish([], "denied");
+      }
+    });
+  }
   const inFlight = new Map;
   function changed(lessonId, phase, details = {}) {
     const state = repo.forLesson(lessonId).checkin;
@@ -4909,6 +4988,12 @@
           data: JSON.stringify(request.payload),
           timeout: timeout,
           anonymous: false,
+          cookiePartition: {
+            topLevelSite: "https://yuketang.cn"
+          },
+          ...request.cookie ? {
+            cookie: request.cookie
+          } : {},
           onload: response => {
             try {
               if (response.finalUrl && new URL(response.finalUrl).origin !== location.origin) return finish(new CheckinError("签到响应跳转到了其他站点", {
@@ -4960,17 +5045,22 @@
       });
       const work = async () => {
         guard();
+        const headers = Object.fromEntries(Object.entries(request.headers).filter(([name]) => !/^(user-agent|cookie|referer|origin|host)$/i.test(name)));
         const response = await fetch(request.url, {
           method: "POST",
           credentials: "include",
-          headers: request.headers,
+          redirect: "error",
+          headers: headers,
           body: JSON.stringify(request.payload),
           signal: controller.signal
+        });
+        if (response.url && new URL(response.url, location.origin).origin !== location.origin) throw new CheckinError("签到响应跳转到了其他站点", {
+          unknown: true
         });
         return {
           status: response.status,
           body: await response.text(),
-          headers: `set-auth: ${response.headers.get("set-auth") || ""}`
+          headers: `set-auth: ${response.headers?.get("set-auth") || ""}`
         };
       };
       return await Promise.race([ work(), aborted, new Promise((_, reject) => {
@@ -5006,13 +5096,14 @@
     }));
     if (accountId !== "anonymous" && !options.force && state.phase === "confirmed" && ctx.auth?.token && state.channel === channel && Date.now() - state.confirmedAt < 3e4) return Promise.resolve({
       ...ctx.auth,
+      transport: state.transport,
       confirmed: true,
       code: 0,
       lessonId: id,
       channel: channel
     });
     const run = async () => {
-      let stage = "preflight", requestSent = false;
+      let stage = "preflight", requestSent = false, transport = channel === "app" ? "gm" : "browser", identity;
       const guard = () => {
         if (repo.accountId !== accountId) throw new CheckinError("账号已变化，签到请求已停止");
         options.guard?.();
@@ -5028,8 +5119,13 @@
           channel: channel === "app" ? "web" : channel
         });
         const timeout = Math.max(1, Math.min(3e4, Number(options.timeout) || 12e3));
-        const started = Date.now(), remaining = () => Math.max(1, Math.min(timeout, timeout - (Date.now() - started)));
-        let identity;
+        const clock = () => globalThis.performance?.now?.() ?? Date.now(), started = clock();
+        const remaining = () => {
+          const budget = timeout - (clock() - started);
+          if (budget <= 0) throw new CheckinError("签到操作已超时，请手动重试");
+          return Math.max(1, Math.ceil(Math.min(timeout, budget)));
+        };
+        let session;
         if (channel === "app") {
           stage = "identity";
           changed(id, "identifying", {
@@ -5053,6 +5149,24 @@
             lessonId: id,
             source: identity.source
           });
+          stage = "session";
+          changed(id, "preparing", {
+            channel: channel,
+            stage: stage
+          });
+          session = await resolveCheckinSession({
+            timeout: Math.min(1500, remaining()),
+            signal: options.signal,
+            guard: guard
+          });
+          guard();
+          diag("checkin-session-ready", {
+            lessonId: id,
+            source: session.source,
+            cookieApi: session.cookieApi,
+            sessionHeaderAvailable: !!session.sessionid,
+            csrfHeaderAvailable: !!session.csrftoken
+          });
         }
         const request = buildCheckinRequest({
           origin: location.origin,
@@ -5061,36 +5175,79 @@
           cookie: document.cookie,
           channel: channel
         });
+        if (session?.sessionid) request.headers.sessionid = session.sessionid;
+        if (session?.csrftoken) request.headers["x-csrftoken"] = session.csrftoken;
+        if (session?.cookie) request.cookie = session.cookie;
         stage = "checkin";
         changed(id, "signing", {
           channel: channel,
           stage: stage,
+          transport: transport,
           code: null,
           lastError: "",
           nextAttemptAt: 0
         });
         diag("checkin-start", {
           lessonId: id,
-          channel: channel
+          channel: channel,
+          transport: transport
         });
         const sendGuard = () => {
           guard();
           requestSent = true;
         };
-        const response = await (channel === "app" ? requestAppCheckin : requestWebCheckin)(request, {
+        let response = await (channel === "app" ? requestAppCheckin : requestWebCheckin)(request, {
           timeout: remaining(),
           signal: options.signal,
           guard: sendGuard
         });
         if (repo.accountId !== accountId) throw new CheckinError("账号已变化，旧签到结果已丢弃");
         stage = "response";
-        const result = {
-          ...parseCheckinResponse({
+        let parsed;
+        try {
+          parsed = parseCheckinResponse({
             ...response,
             lessonId: id,
             channel: channel
-          }),
-          userId: identity?.userId
+          });
+        } catch (error) {
+          // A definitive authentication rejection is safe to retry once using
+          // the page's own session. Keep source=21 and the App identity headers.
+          // Unknown outcomes, timeouts and dynamic-QR refusals are never retried.
+          if (channel !== "app" || error.unknown || ![ 5e4, 401 ].includes(error.code) && ![ 401, 403 ].includes(error.status)) throw error;
+          guard();
+          if (options.signal?.aborted) throw new CheckinError("签到请求已取消");
+          transport = "browser";
+          stage = "checkin";
+          diag("checkin-transport-fallback", {
+            lessonId: id,
+            from: "gm",
+            to: transport,
+            code: error.code,
+            httpStatus: error.status
+          });
+          changed(id, "signing", {
+            channel: channel,
+            stage: stage,
+            transport: transport
+          });
+          response = await requestWebCheckin(request, {
+            timeout: remaining(),
+            signal: options.signal,
+            guard: sendGuard
+          });
+          guard();
+          stage = "response";
+          parsed = parseCheckinResponse({
+            ...response,
+            lessonId: id,
+            channel: channel
+          });
+        }
+        const result = {
+          ...parsed,
+          userId: identity?.userId,
+          transport: transport
         };
         ctx.auth = {
           token: result.token,
@@ -5100,6 +5257,7 @@
         changed(id, "confirmed", {
           channel: channel,
           stage: "confirmed",
+          transport: transport,
           code: 0,
           confirmedAt: Date.now(),
           lastError: "",
@@ -5108,15 +5266,18 @@
         diag("checkin-confirmed", {
           lessonId: id,
           channel: channel,
+          transport: transport,
           bearerAvailable: !!result.setAuth
         });
         return result;
       } catch (error) {
         if (repo.accountId === accountId) {
+          if (stage === "response" && [ 5e4, 401 ].includes(error.code) && identity?.source?.startsWith("/")) error.message = `网页账号读取正常，但签到鉴权失败（${error.code}）。请导出诊断日志`;
           const phase = error.code === 50070 ? "refused" : error.unknown ? "unknown" : "failed";
           changed(id, phase, {
             channel: channel,
             stage: stage,
+            transport: transport,
             code: error.code ?? null,
             lastError: error.message,
             nextAttemptAt: Date.now() + (error.unknown ? 3e4 : 6e4)
@@ -5127,6 +5288,7 @@
             code: error.code ?? null,
             phase: phase,
             stage: stage,
+            transport: transport,
             requestSent: requestSent,
             httpStatus: error.status || 0
           });
@@ -5330,6 +5492,7 @@
       const status = create("p", {
         idle: "尚未签到",
         identifying: "正在识别当前登录账号…",
+        preparing: "正在读取签到登录态…",
         signing: "正在签到…",
         confirmed: "服务器已确认签到",
         refused: "动态码通道被服务器拒绝",
@@ -5341,7 +5504,7 @@
       const detail = create("p", state.lastError || (state.phase === "confirmed" ? `${state.channel === "app" ? "客户端" : "普通"}通道 · ${connection?.readyState === 1 ? "课堂连接已建立" : connection?.readyState === 0 ? "正在连接课堂" : "等待课堂连接"}` : ""), "checkin-detail");
       const button = create("button", state.phase === "confirmed" ? "重新签到并连接" : "立即签到");
       button.type = "button";
-      button.disabled = [ "identifying", "signing" ].includes(state.phase);
+      button.disabled = [ "identifying", "preparing", "signing" ].includes(state.phase);
       button.onclick = async () => {
         button.disabled = true;
         try {
@@ -7392,7 +7555,7 @@
     if (desktopStarted) return;
     desktopStarted = true;
     diag("boot", {
-      version: "1.22.2-beta.2",
+      version: "1.22.2-beta.3",
       readyState: INJECTED_READY_STATE,
       autoAnswer: !!ui.config.autoAnswer
     });
@@ -7400,10 +7563,10 @@
       // 控制台：__yktHelperDiag.download() 导出诊断日志
       (gm.uw || window).__yktHelperDiag = {
         dump: () => exportDiagnostics({
-          version: "1.22.2-beta.2"
+          version: "1.22.2-beta.3"
         }),
         download: () => downloadDiagnostics({
-          version: "1.22.2-beta.2"
+          version: "1.22.2-beta.3"
         }),
         clear: clearDiagnostics
       };

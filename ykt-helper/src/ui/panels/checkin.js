@@ -45,10 +45,10 @@ export function renderCheckinList() {
   for (const [id, lesson] of all) {
     const state = getLessonCheckinState(id), row = create('div', null, 'checkin-row'); row.dataset.lessonId = id;
     const title = create('div', lesson.courseName || lesson.classroomName || lesson.title || `课堂 ${id}`, 'checkin-title');
-    const status = create('p', ({ idle: '尚未签到', identifying: '正在识别当前登录账号…', signing: '正在签到…', confirmed: '服务器已确认签到', refused: '动态码通道被服务器拒绝', unknown: '签到结果待核实', failed: '签到失败', cancelled: '签到已停止' })[state.phase] || state.phase, 'checkin-status');
+    const status = create('p', ({ idle: '尚未签到', identifying: '正在识别当前登录账号…', preparing: '正在读取签到登录态…', signing: '正在签到…', confirmed: '服务器已确认签到', refused: '动态码通道被服务器拒绝', unknown: '签到结果待核实', failed: '签到失败', cancelled: '签到已停止' })[state.phase] || state.phase, 'checkin-status');
     const connection = repo.isLessonConnected(id);
     const detail = create('p', state.lastError || (state.phase === 'confirmed' ? `${state.channel === 'app' ? '客户端' : '普通'}通道 · ${connection?.readyState === 1 ? '课堂连接已建立' : connection?.readyState === 0 ? '正在连接课堂' : '等待课堂连接'}` : ''), 'checkin-detail');
-    const button = create('button', state.phase === 'confirmed' ? '重新签到并连接' : '立即签到'); button.type = 'button'; button.disabled = ['identifying', 'signing'].includes(state.phase);
+    const button = create('button', state.phase === 'confirmed' ? '重新签到并连接' : '立即签到'); button.type = 'button'; button.disabled = ['identifying', 'preparing', 'signing'].includes(state.phase);
     button.onclick = async () => {
       button.disabled = true;
       try { await actions.joinClassroom(id, { force: true }); }
