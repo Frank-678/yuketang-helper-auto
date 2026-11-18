@@ -22,6 +22,14 @@ beta.2 修复已登录网页缺少 `user_id` Cookie 时无法识别账号的问�
 
 旧的 1.21.7 成品保留在 `release/`，可用于回滚。启用一份脚本即可，避免同时运行旧版与新版。
 
+### 已登录但签到返回 50000
+
+如果诊断显示本人资料读取成功，同时 `cookieApi=available`、`sessionHeaderAvailable=false`，表示 Cookie API 能调用，但没有向脚本提供可用于签到的 sessionid。此时重复网页登录未必能解决。
+
+Tampermonkey 用户先检查：管理面板 → 设置 → `Config Mode` 设为 `Advanced` → `Security` → `Allow scripts to access cookies` 设为 `All`，保存后刷新课堂页，再点“立即签到”。维护者说明正式版默认只返回非 HttpOnly Cookie，这个选项可开放读取：[官方说明](https://github.com/Tampermonkey/tampermonkey/issues/465)。该设置影响已获得 Cookie 权限的脚本。
+
+继续使用 beta.3 即可验证：先看新诊断中的 `sessionHeaderAvailable` 是否变为 `true`，再看签到接口实际结果。它变为 true 只说明会话头已补齐，不等于签到已成功。如果选项不存在或已经设为 All 仍读不到，需进一步核查脚本管理器名称/版本及 Cookie 路径、分区，不能仅凭 50000 判定原因。无需提供 Cookie 值。
+
 ## 答案与提交
 
 本地草稿、AI 建议、服务器已确认答案分别保存。草稿编辑会自动保存到当前设备，保存本地不会标记为已提交。AI 期间的人工修改或手动提交优先。

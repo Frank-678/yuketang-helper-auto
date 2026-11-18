@@ -40,7 +40,15 @@ beta.2 在 Cookie 和页面用户对象没有 ID 时，使用当前网页的完�
 
 新增诊断只记录请求使用 GM 或 browser、是否有 sessionid / CSRF 请求头、Cookie API 能力及重试触发码，不包含 Cookie 值。还将本人资料中 id 与 uid 同时存在时的优先级对齐公开客户端。现场日志目前未记录具体 Cookie 与特殊头能力，所以会话凭据不完整仍是待实测的原因，不能把本地模拟恢复当成服务器已接受。
 
-兼容依据：[Tampermonkey GM 请求说明](https://www.tampermonkey.net/documentation.php?locale=en&q=GM_xmlhttpRequest)注明 Android 对部分特殊头的限制、Cookie 合并和分区选项；[Cookie API 说明](https://www.tampermonkey.net/documentation.php?locale=en&q=GM_cookie)列出读取接口及 HttpOnly 支持限制。脚本按实际可用能力处理，不假定所有移动端环境都能读取 HttpOnly Cookie。
+兼容依据：[Tampermonkey GM 请求说明](https://www.tampermonkey.net/documentation.php?locale=en&q=GM_xmlhttpRequest)注明 Android 对部分特殊头的限制、Cookie 合并和分区选项；[Cookie API 说明](https://www.tampermonkey.net/documentation.php?locale=en&q=GM_cookie)列出读取接口，其 HttpOnly 限制注记需要结合维护者后续说明阅读。维护者在 [官方 issue #465](https://github.com/Tampermonkey/tampermonkey/issues/465) 中确认，正式版默认只返回非 HttpOnly Cookie，可通过 Advanced / Security 设置开放读取。脚本按实际可用能力处理，不假定所有移动端环境都能读取 HttpOnly Cookie。
+
+## beta.3 实测后的环境检查
+
+新一轮现场日志中，两次本人资料读取均成功；两次会话准备均为 `source=jar-only`、`cookieApi=available`、`sessionHeaderAvailable=false`、`csrfHeaderAvailable=true`。随后 GM 请求和网页会话重试均返回业务码 50000。已确认桥接没有取得 sessionid，且网页重试也没有恢复签到。尚未确认的是读取缺失由权限、Cookie 查询路径、分区还是其他环境差异造成，不能把 Cookie API available 当成凭据完整。
+
+若使用 Tampermonkey，先在管理面板打开设置，将 `Config Mode` 设为 `Advanced`，再将 `Security` → `Allow scripts to access cookies` 设为 `All`，保存后用现有 beta.3 刷新课堂页并手动签到。该设置允许已获得 Cookie 权限的脚本读取 HttpOnly Cookie；不需要用户导出或提供凭据值。设置依据为上述官方 issue 中维护者 2024-11-15 的说明，正式版也有此配置入口，并非必须换用 Beta 扩展。
+
+验收分两步：先确认新日志的 `sessionHeaderAvailable=true`，再确认签到业务码与课堂凭据。前者不是签到成功证明。如果该设置不存在或已经开放仍缺少 sessionid，下一步需要脚本管理器名称/版本及查询范围信息；继续改错误提示或重复登录不能代替这项核查。本次只补充说明，脚本版本仍为 beta.3，不声称实机问题已解决。
 
 ## 改动
 
