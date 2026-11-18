@@ -8,6 +8,7 @@ export function installToolbar() {
   bar.innerHTML = `
     <span id="ykt-btn-bell" class="btn" title="习题提醒"><i class="fas fa-bell"></i></span>
     <span id="ykt-btn-pres" class="btn" title="课件浏览"><i class="fas fa-file-powerpoint"></i></span>
+    <span id="ykt-btn-checkin" class="btn" title="课堂签到"><i class="fas fa-qrcode"></i></span>
     <span id="ykt-btn-ai" class="btn" title="AI解答"><i class="fas fa-robot"></i></span>
     <span id="ykt-btn-auto-answer" class="btn" title="自动作答"><i class="fas fa-magic-wand-sparkles"></i></span>
     <span id="ykt-btn-settings" class="btn" title="设置"><i class="fas fa-cog"></i></span>
@@ -34,6 +35,9 @@ export function installToolbar() {
     ui.showPresentationPanel?.(!isActive);
     btn.classList.toggle('active', !isActive);
   });
+
+  // AI按钮
+  bar.querySelector('#ykt-btn-checkin')?.addEventListener('click', () => ui.showCheckinPanel?.(!document.getElementById('ykt-checkin-panel')?.classList.contains('visible')));
 
   // AI按钮
   bar.querySelector('#ykt-btn-ai')?.addEventListener('click', () => {

@@ -11,6 +11,7 @@ import * as ProbListPanel from './panels/problem-list.js';
 import * as ActivePanel from './panels/active-problems.js';
 import * as TutorialPanel from './panels/tutorial.js';
 import * as QuickAnswer from './quick-answer.js';
+import * as CheckinPanel from './panels/checkin.js';
 import { PROBLEM_TYPE_MAP } from '../core/types.js'
 import { getReminderChannels, getReminderVolume, isReminderEnabled } from '../core/reminder-preferences.js';
 
@@ -100,6 +101,7 @@ export const ui = {
   updateProblemList: ProbListPanel.updateProblemList,
   updateActiveProblems: ActivePanel.updateActiveProblems,
   refreshQuickAnswerControl: QuickAnswer.refreshQuickAnswerControl,
+  showCheckinPanel: CheckinPanel.showCheckinPanel,
 
   // 提升面板层级的辅助函数
   _bringToFront(panelElement) {

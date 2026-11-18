@@ -256,18 +256,32 @@ export const actions = {
     if (document.body) refresh(next);
   },
   startAutoAnswerLoop,
+  async joinClassroom(lessonId, options = {}) {
+    const accountId = repo.accountId;
+    const result = await checkinClass(lessonId, { channel: ui.config.dynamicQrCheckin ? 'app' : 'web', ...options });
+    if (repo.accountId !== accountId) throw new Error('账号已变化，旧课堂连接已停止');
+    try { options.guard?.(); } catch { return result; }
+    if (options.automatic) repo.markLessonAutoJoined(lessonId);
+    connectOrAttachLessonWS({ lessonId: key(lessonId), auth: result.token });
+    return result;
+  },
   startAutoJoinLoop() {
     if (repo.autoJoinRunning) return;
     repo.autoJoinRunning = true; const generation = ++joinGeneration;
     const loop = async () => {
       if (!repo.autoJoinRunning || generation !== joinGeneration) return;
       try {
-        for (const item of await getOnLesson()) {
+        const pollAccount = repo.accountId;
+        const lessons = await getOnLesson();
+        if (repo.accountId !== pollAccount || !repo.autoJoinRunning || generation !== joinGeneration) return;
+        for (const item of lessons) {
           const lessonId = key(item.lessonId ?? item.lesson_id ?? item.id);
           if (!lessonId || Number(item.status) !== 1 || repo.isLessonConnected(lessonId)) continue;
-          const { token } = await checkinClass(lessonId);
-          if (!repo.autoJoinRunning || generation !== joinGeneration) return;
-          if (token) { repo.markLessonAutoJoined(lessonId); connectOrAttachLessonWS({ lessonId, auth: token }); }
+          if (repo.forLesson(lessonId).checkin.nextAttemptAt > Date.now()) continue;
+          try {
+            await this.joinClassroom(lessonId, { automatic: true, guard: () => { if (repo.accountId !== pollAccount || !repo.autoJoinRunning || generation !== joinGeneration) throw new Error('自动进入课堂已停止或账号已变化'); } });
+          } catch (error) { diag('auto-join-error', { lessonId, code: error.code ?? null, message: error.message }); }
+          if (repo.accountId !== pollAccount || !repo.autoJoinRunning || generation !== joinGeneration) return;
         }
       } catch (error) { diag('auto-join-error', { message: error.message }); }
       finally { if (repo.autoJoinRunning && generation === joinGeneration) joinTimer = setTimeout(loop, 5000); }

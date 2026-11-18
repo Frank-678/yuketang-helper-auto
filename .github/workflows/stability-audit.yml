@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "fix/**"
+      - "feat/**"
   pull_request:
     paths:
       - 'ykt-helper/**'
@@ -37,7 +38,7 @@ jobs:
         run: npm test
 
       - name: Check built artifact syntax
-        run: node --check dist/ykt-helper-1221.user.js
+        run: node --check dist/ykt-helper-1222-beta1.user.js
 
   archive-retired-branches:
     needs: test-and-build

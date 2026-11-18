@@ -6,14 +6,14 @@ import { hasSubmittedAnswer, sameAnswer, validateAnswer } from '../core/answer-s
 export class SubmissionError extends Error {
   constructor(message, { code = null, unknown = false, status = null } = {}) { super(message); this.name = 'SubmissionError'; this.code = code; this.unknown = unknown; this.status = status; }
 }
-function headers() { return { 'Content-Type': 'application/json', xtbz: 'ykt', 'X-Client': 'h5', Authorization: 'Bearer ' + (globalThis.localStorage?.getItem('Authorization') || '') }; }
+function headers(lessonId = repo.currentLessonId) { return { 'Content-Type': 'application/json', xtbz: 'ykt', 'X-Client': 'h5', Authorization: 'Bearer ' + (repo.forLesson(lessonId).auth?.setAuth || globalThis.localStorage?.getItem('Authorization') || '') }; }
 function post(url, payload, options = {}) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.__yktOwnSubmission = true;
     xhr.open('POST', url, true);
     xhr.timeout = options.timeout ?? 20000;
-    for (const [k, v] of Object.entries({ ...headers(), ...options.headers })) xhr.setRequestHeader(k, v);
+    for (const [k, v] of Object.entries({ ...headers(options.lessonId), ...options.headers })) xhr.setRequestHeader(k, v);
     xhr.onload = () => {
       if (xhr.status < 200 || xhr.status >= 300) return reject(new SubmissionError(`提交 HTTP ${xhr.status}`, { status: xhr.status, unknown: xhr.status >= 500 }));
       let data;
@@ -89,7 +89,7 @@ export async function submitAnswer(problem, answer, options = {}) {
     const perform = async () => {
       guard();
       const dt = Number.isFinite(start) && start > 0 ? Math.min(start + 2000, Number.isFinite(end) ? end - 1 : start + 2000) : Number.isFinite(end) ? end - 1000 : Date.now() - 2000;
-      return route === 'retry' ? retryAnswer(p, result, dt, { ...options, guard }) : answerProblem(p, result, { ...options, guard });
+      return route === 'retry' ? retryAnswer(p, result, dt, { ...options, lessonId, guard }) : answerProblem(p, result, { ...options, lessonId, guard });
     };
     try {
       let resp;

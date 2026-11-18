@@ -20,6 +20,7 @@ export const DEFAULT_CONFIG = {
   verifyAnswerProfileId: '',
   answerVerification: false,
   autoJoinEnabled: false,
+  dynamicQrCheckin: true,
   autoAnswerOnAutoJoin: true,
   aiAutoAnalyze: false,
   customNotifyAudioSrc: '',

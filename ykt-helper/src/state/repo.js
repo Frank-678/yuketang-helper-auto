@@ -19,9 +19,10 @@ function accountScope() {
   } catch { return 'anonymous'; }
 }
 const classrooms = new Map();
+const autoJoinedByAccount = new Map();
 let currentLessonId = null;
 function fresh(lessonId, scope) {
-  return { lessonId: String(lessonId || ''), scope, presentations: new IdMap(), slides: new IdMap(), problems: new IdMap(), problemStatus: new IdMap(), encounteredProblems: [], pendingEvents: new Map(), currentPresentationId: null, currentSlideId: null, currentSelectedUrl: null, loadedWork: false };
+  return { lessonId: String(lessonId || ''), scope, presentations: new IdMap(), slides: new IdMap(), problems: new IdMap(), problemStatus: new IdMap(), encounteredProblems: [], pendingEvents: new Map(), currentPresentationId: null, currentSlideId: null, currentSelectedUrl: null, loadedWork: false, auth: null, checkin: { phase: 'idle', channel: null, code: null, confirmedAt: null, nextAttemptAt: 0, lastError: '' } };
 }
 export const repo = {
   get accountId() { return accountScope(); },
@@ -109,7 +110,9 @@ export const repo = {
     this.loadWork(lessonId);
   },
   listeningLessons: new Set(), lessonTokens: new IdMap(), lessonSockets: new IdMap(),
-  autoJoinRunning: false, autoJoinedLessons: new Set(), forceAutoAnswerLessons: new Set(),
+  autoJoinRunning: false,
+  get autoJoinedLessons() { const account = accountScope(); if (!autoJoinedByAccount.has(account)) autoJoinedByAccount.set(account, new Set()); return autoJoinedByAccount.get(account); },
+  forceAutoAnswerLessons: new Set(),
   markLessonConnected(lessonId, ws, token) { const id = String(lessonId); if (token) this.lessonTokens.set(id, token); if (ws) this.lessonSockets.set(id, ws); this.listeningLessons.add(id); },
   isLessonConnected(lessonId) { const ws = this.lessonSockets.get(lessonId); return ws && (!ws.__yktAccountId || ws.__yktAccountId === this.accountId) && (ws.readyState === 0 || ws.readyState === 1) ? ws : false; },
   markLessonAutoJoined(lessonId, enabled = true) { if (lessonId == null) return; if (enabled) this.autoJoinedLessons.add(String(lessonId)); else this.autoJoinedLessons.delete(String(lessonId)); },

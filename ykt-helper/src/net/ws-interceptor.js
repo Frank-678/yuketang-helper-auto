@@ -207,7 +207,7 @@ function getUserIdSafe() {
     if (window?.YktUser?.id) return window.YktUser.id;
     if (window?.__INITIAL_STATE__?.user?.userId) return window.__INITIAL_STATE__.user.userId;
     const m = document.cookie.match(/(?:^|;\s*)user_id=(\d+)/);
-    if (m) return Number(m[1]);
+    if (m) return m[1];
   } catch {}
   return undefined;
 }

@@ -87,6 +87,7 @@ export function mountSettingsPanel() {
   const $verification = root.querySelector('#ykt-answer-verify');
   const $auto = root.querySelector('#ykt-input-auto-answer');
   const $autoJoin = root.querySelector('#ykt-input-auto-join');
+  const $dynamicQrCheckin = root.querySelector('#ykt-input-dynamic-qr-checkin');
   const $autoJoinAutoAnswer = root.querySelector('#ykt-input-auto-join-auto-answer');
   const $autoAnalyze = root.querySelector('#ykt-input-ai-auto-analyze');
   const $delay = root.querySelector('#ykt-input-answer-delay');
@@ -242,6 +243,7 @@ export function mountSettingsPanel() {
     $verifyProfile.value = ui.config.verifyAnswerProfileId || '';
     $verification.checked = !!ui.config.answerVerification;
     $autoJoin.checked = !!ui.config.autoJoinEnabled;
+    $dynamicQrCheckin.checked = !!ui.config.dynamicQrCheckin;
     $autoJoinAutoAnswer.checked = !!ui.config.autoAnswerOnAutoJoin;
     $auto.checked = !!ui.config.autoAnswer;
     $autoAnalyze.checked = !!ui.config.aiAutoAnalyze;
@@ -306,6 +308,7 @@ export function mountSettingsPanel() {
     ui.config.verifyAnswerProfileId = $verifyProfile.value;
     ui.config.answerVerification = $verification.checked;
     ui.config.autoJoinEnabled = !!$autoJoin.checked;
+    ui.config.dynamicQrCheckin = !!$dynamicQrCheckin.checked;
     ui.config.autoAnswerOnAutoJoin = !!$autoJoinAutoAnswer.checked;
     ui.config.autoAnswer = !!$auto.checked;
     ui.config.aiAutoAnalyze = !!$autoAnalyze.checked;

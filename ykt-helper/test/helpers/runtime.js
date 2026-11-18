@@ -15,13 +15,14 @@ recognizeCurrentSlideText, translateCurrentOCRText, ensureStaticReportPresentati
 installXHRInterceptor, installFetchInterceptor, installWSInterceptor, connectOrAttachLessonWS,
 installRuntimeRouteWatcher, bootCurrentRuntime, createDanmuFollowTracker, createDanmuFollowController, sendDanmuText,
 mountQuickAnswerControl, refreshQuickAnswerControl, openQuickAnswer,
+requestLessonCheckin, getLessonCheckinState, showCheckinPanel, renderCheckinList, exportDiagnostics,
 hooks(o) { if(o.capture) captureSlideImage=o.capture; if(o.fallback) captureProblemForVision=o.fallback; if(o.vision) queryAIVision=o.vision; if(o.ocr) queryOCRVision=o.ocr; if(o.translate) queryTranslationText=o.translate; if(o.lessons)getOnLesson=o.lessons; }
 };})();`;
 export const plain = value => JSON.parse(JSON.stringify(value));
 export const tick = async (ms = 0) => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, ms)); };
 export function deferred() { let resolve, reject; const promise = new Promise((r, j) => { resolve = r; reject = j; }); return { promise, resolve, reject }; }
 export function environment(t, config = {}, options = {}) {
-  const errors = [], requests = [], aiRequests = [], notices = [], consoleErrors = [];
+  const errors = [], requests = [], aiRequests = [], gmRequests = [], notices = [], consoleErrors = [];
   const vc = new VirtualConsole(); vc.on('jsdomError', e => errors.push(e.message)); vc.on('error', (...args) => consoleErrors.push(args.map(String).join(' ')));
   const dom = new JSDOM('<!doctype html><html><head></head><body><div id="app"></div></body></html>', { url: options.url || 'https://changjiang.yuketang.cn/lesson/fullscreen/v3/L1', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: vc });
   const w = dom.window; t?.after(() => dom.window.close());
@@ -37,7 +38,7 @@ export function environment(t, config = {}, options = {}) {
   class XHR extends w.EventTarget {
     constructor() { super(); this.timeout = 0; this.status = 200; }
     open(...args) { this.openArguments = args; this.url = String(args[1]); this.method = args[0]; }
-    setRequestHeader() {}
+    setRequestHeader(key, value) { (this.headers ||= {})[key] = value; }
     send(body) {
       this.body = body; requests.push(this);
       let response = options.respond?.(this.url, typeof body === 'string' ? JSON.parse(body) : body, this) ?? { code: 0, data: { success: ['P', 'Q'] } };
@@ -51,7 +52,14 @@ export function environment(t, config = {}, options = {}) {
     abort() { this.onabort?.(); this.dispatchEvent(new w.Event('loadend')); }
   }
   w.XMLHttpRequest = XHR;
-  w.GM_xmlhttpRequest = opt => { aiRequests.push(opt); if (options.onAI) options.onAI(opt); else queueMicrotask(() => opt.onload({ status: 200, responseText: JSON.stringify({ choices: [{ message: { content: '答案: ["A"]\n解释: fixture' } }] }) })); return { abort() { opt.onabort?.(); } }; };
+  w.GM_xmlhttpRequest = opt => {
+    if (opt.url.includes('/lesson/checkin')) {
+      gmRequests.push(opt);
+      if (options.onCheckin) options.onCheckin(opt);
+      else queueMicrotask(() => opt.onload({ status: 200, responseHeaders: 'Set-Auth: fixture-lesson-bearer', responseText: JSON.stringify({ code: 0, data: { lessonToken: 'fixture-lesson-token', lessonId: JSON.parse(opt.data).lessonId } }) }));
+    } else { aiRequests.push(opt); if (options.onAI) options.onAI(opt); else queueMicrotask(() => opt.onload({ status: 200, responseText: JSON.stringify({ choices: [{ message: { content: '答案: ["A"]\n解释: fixture' } }] }) })); }
+    return { abort() { opt.onabort?.(); } };
+  };
   w.GM_notification = () => {}; w.GM_addStyle = () => {};
   w.fetch = async (...args) => options.fetch?.(...args) || { ok: true, status: 200, clone() { return this; }, json: async () => ({ code: 0, data: [] }), text: async () => '{"code":0,"data":[]}', headers: { get() { return null; } } };
   w.Request = globalThis.Request;
@@ -67,7 +75,7 @@ export function environment(t, config = {}, options = {}) {
     const realToast = a.ui.toast; a.ui.toast = (...args) => { notices.push(args); return realToast(...args); };
     a.hooks({ capture: async () => 'data:image/jpeg;base64,/9j/AAAA', fallback: async () => null, lessons: async () => [] });
   }
-  return { w, a, requests, aiRequests, notices, errors, consoleErrors, setNow(value) { now = value; }, addProblem(id = 'P', extra = {}, lessonId = 'L1') {
+  return { w, a, requests, aiRequests, gmRequests, notices, errors, consoleErrors, setNow(value) { now = value; }, addProblem(id = 'P', extra = {}, lessonId = 'L1') {
     const ctx = a.repo.forLesson(lessonId), sid = 'S' + id, pres = 'PR' + id;
     a.repo.setPresentation(pres, { slides: [{ id: sid, cover: 'https://image.example.test/slide.jpg', problem: { problemId: id, problemType: 1, body: 'Choose', options: [{ key: 'A', value: 'a' }, { key: 'B', value: 'b' }], ...extra } }] }, lessonId, { persist: false });
     ctx.problemStatus.set(id, { lessonId, slideId: sid, presentationId: pres, startTime: now - 1000, endTime: now + 60000, autoAnswerTime: null, answering: false, done: false, phase: 'idle' });
