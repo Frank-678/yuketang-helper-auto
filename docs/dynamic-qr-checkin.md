@@ -54,4 +54,6 @@ HTTP 接口字段作为兼容依据，助手代码独立实现。公开客户端
 
 ## 分支与交付
 
-本地基于真实 main 提交建立功能分支，代码、测试及说明均在该分支。GitHub App 创建远端分支首次返回 403（Resource not accessible by integration）。随后尝试标准 Git 推送，也因没有可用的 GitHub 写入凭据而失败。因此本轮远端分支尚未创建，远端 CI 未运行；本地代码和验证已完成，并提供分支恢复包。没有创建 PR，也没有合并 main。
+2026-11-18 重试 GitHub 上传成功。完整源码、测试、构建产物及说明已发布到独立分支 [feat/dynamic-qr-checkin](https://github.com/Frank-678/yuketang-helper-auto/tree/feat/dynamic-qr-checkin)，远端文件树与本地交付内容一致。此前 GitHub App 的 403 写入错误已恢复。
+
+该分支的推送会触发 Stability Audit，运行完整回归测试和构建产物语法检查；最新状态与日志见 [GitHub Actions](https://github.com/Frank-678/yuketang-helper-auto/actions?query=branch%3Afeat%2Fdynamic-qr-checkin)。测试版可从分支中的 [单文件 userscript](https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js) 安装。当前仍为功能分支，未创建 PR，未合并 main。
