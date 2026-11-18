@@ -3,7 +3,7 @@
 日期：2026-11-18（北京时间）  
 分支：`feat/dynamic-qr-checkin`  
 基线：`fba66658669ce75a0a1c920fa1c09d0474bb6f1c`，main 1.22.1  
-测试版：`1.22.2-beta.3`
+测试版：`1.22.2-beta.4`
 
 ## 依据与实现选择
 
@@ -48,7 +48,22 @@ beta.2 在 Cookie 和页面用户对象没有 ID 时，使用当前网页的完�
 
 若使用 Tampermonkey，先在管理面板打开设置，将 `Config Mode` 设为 `Advanced`，再将 `Security` → `Allow scripts to access cookies` 设为 `All`，保存后用现有 beta.3 刷新课堂页并手动签到。该设置允许已获得 Cookie 权限的脚本读取 HttpOnly Cookie；不需要用户导出或提供凭据值。设置依据为上述官方 issue 中维护者 2024-11-15 的说明，正式版也有此配置入口，并非必须换用 Beta 扩展。
 
-验收分两步：先确认新日志的 `sessionHeaderAvailable=true`，再确认签到业务码与课堂凭据。前者不是签到成功证明。如果该设置不存在或已经开放仍缺少 sessionid，下一步需要脚本管理器名称/版本及查询范围信息；继续改错误提示或重复登录不能代替这项核查。本次只补充说明，脚本版本仍为 beta.3，不声称实机问题已解决。
+验收分两步：先确认新日志的 `sessionHeaderAvailable=true`，再确认签到业务码与课堂凭据。前者不是签到成功证明。如果该设置不存在或已经开放仍缺少 sessionid，下一步需要脚本管理器名称/版本及查询范围信息；继续改错误提示或重复登录不能代替这项核查。该轮只补充了说明，未声称实机问题已解决。
+
+## beta.4：已取得 sessionid 后的凭据封装修正
+
+用户随后提供的日志显示，开放 Cookie 权限之后，两次均已得到 `source=gm-cookie`、`sessionHeaderAvailable=true`、`csrfHeaderAvailable=true`；GM 请求和网页重试仍然返回 50000。因此“没有取得 sessionid”已不再是这轮失败的解释，权限调整只解决了前一个缺项。
+
+代码比对确认，beta.3 显式传递的 Cookie 只有 sessionid / csrftoken；公开原生客户端发送当前登录态的完整 Cookie。现有答题客户端和上游桌面端也会使用当前站点的 Authorization。beta.4 修正这些可见差异：
+
+1. Cookie API 查询 URL 改为实际 `/api/v3/lesson/checkin`，按目标路径选取 Cookie；新增该精确 URL 的 metadata 匹配，以满足读取权限检查。直接打开这个 JSON 地址时不会启动课堂界面或网络拦截器。
+2. 保留适用于当前域名、路径、有效期及分区的 Cookie 快照，包括 sessionid_sign 和其他配套字段。只有从管理器快照取得 sessionid 才显式附加 Cookie 头及 GM cookie 参数；仅有 document.cookie 时仍使用原 Cookie jar，避免用可见的部分覆盖 HttpOnly 凭据。
+3. 在 GM 及网页请求中携带当前站点 localStorage 中已有的 Authorization，规范为一个 Bearer 前缀，拒绝无效头值。没有这个值时不生成或猜测凭据；也不将新课堂的 Set-Auth 写回全局存储。
+4. 增加 `signedSessionAvailable`、`authorizationAvailable`、Cookie 数量和查询目标类别等诊断，不记录 Cookie、Bearer 或课堂 Token 的值；管理器初始化错误也不会将带凭据的原始异常写入日志。
+
+依据：上述公开原生客户端的 Cookie 请求结构；现有 `tsm/answer.js` 的站点 Authorization 使用方式；上游 [会话请求头实现](https://github.com/ZaytsevZY/yuketang-helper-auto/blob/6eaf8b4e3ff68beeb3b1007c1515535c1dfed2fd/ykt-helper-desktop/packages/routing/src/active/session-manager.ts) 和 [网页凭据读取](https://github.com/ZaytsevZY/yuketang-helper-auto/blob/6eaf8b4e3ff68beeb3b1007c1515535c1dfed2fd/ykt-helper-desktop/apps/desktop/main/electron-session-credentials.ts)。这些实现差异可由代码确认，但当前用户日志没有包含服务器实际所需的全部字段，所以不能断言它们就是 50000 的唯一原因。
+
+本轮浏览器连接未提供来源上下文，无法直接读取用户一侧的实时请求。新增回归验证凭据的完整传递、同站限制、重试和日志脱敏；模拟服务器接受完整凭据仅证明转发逻辑正确，beta.4 仍需同一环境的真实签到响应确认。
 
 ## 改动
 
@@ -74,11 +89,11 @@ beta.2 在 Cookie 和页面用户对象没有 ID 时，使用当前网页的完�
 
 ## 验证
 
-- beta.3 本地完整测试：242 项通过，0 失败。beta.1 新增 28 项签到协议及流程回归，beta.2 新增 17 项账号识别回归；beta.3 再新增 17 项，覆盖会话 Cookie 筛选与桥接、接口不可用/超时/取消、账号变化、现场错误序列的单次重试、两通道都失败的提示、未知结果与动态码拒绝不重试，以及凭据不落盘、不进入诊断。
+- beta.4 本地完整测试：251 项通过，0 失败。beta.1 新增 28 项签到协议及流程回归，beta.2 新增 17 项账号识别回归，beta.3 新增 17 项会话桥接与重试回归；beta.4 新增 9 项，并更新配套 Cookie 用例，覆盖完整凭据转发、Bearer 校验与传递、API 查询范围、部分 Cookie 不覆盖原 Cookie jar、JSON 地址不启动课堂 UI，以及敏感异常脱敏。
 - Node userscript 语法检查通过。
 - 构建文件与两个测试版发布副本逐字节一致。
 - main 的稳定发布文件没有修改。
-- 用户实测的 beta.2 已成功识别账号，但签到两次返回 50000。助手未代用用户真实凭据发请求；beta.3 仍需同一课堂与 Android 环境复测，隔离测试通过不等于实机签到已通过。
+- 用户实测已推进到 beta.3 能读取 sessionid，但两种请求方式都返回 50000。助手未代用用户真实凭据发请求；beta.4 仍需同一课堂与 Android 环境复测，隔离测试通过不等于实机签到已通过。
 
 ## 分支与交付
 

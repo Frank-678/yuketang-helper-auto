@@ -136,6 +136,9 @@ function installRuntimeRouteWatcher() {
 }
 
 (function main() {
+  // This match grants the cookie reader access to the target URL. A directly
+  // opened JSON endpoint must not start the classroom UI or install hooks.
+  if (window.location.pathname === '/api/v3/lesson/checkin') return;
   const targetWindow = gm.uw || window;
   const guard = installDesktopRouteGuard({
     targetWindow,

@@ -38,7 +38,7 @@ jobs:
         run: npm test
 
       - name: Check built artifact syntax
-        run: node --check dist/ykt-helper-1222-beta3.user.js
+        run: node --check dist/ykt-helper-1222-beta4.user.js
 
   archive-retired-branches:
     needs: test-and-build

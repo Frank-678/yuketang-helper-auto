@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI雨课堂助手（JS版）
 // @namespace    https://github.com/ZaytsevZY/yuketang-helper-auto
-// @version      1.22.2-beta.3
+// @version      1.22.2-beta.4
 // @homepageURL  https://github.com/Frank-678/yuketang-helper-auto
 // @downloadURL  https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
 // @updateURL    https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
@@ -22,6 +22,7 @@
 // @match        https://changjiang.yuketang.cn/web/*
 // @match        https://*.yuketang.cn/lesson/fullscreen/v3/*
 // @match        https://*.yuketang.cn/v2/web/*
+// @match        https://*.yuketang.cn/api/v3/lesson/checkin
 // @match        https://www.yuketang.cn/lesson/fullscreen/v3/*
 // @match        https://www.yuketang.cn/v2/web/*
 // @match        https://pro.yuketang.cn/lesson/fullscreen/v3/*
@@ -454,8 +455,8 @@
         isphysicaldevice: "true"
       });
     } else headers["x-client"] = "h5";
-    // Let the browser/script manager send its full cookie jar. Explicitly setting
-    // document.cookie would drop HttpOnly cookies and can break valid sessions.
+    // Browser requests use their own cookie jar. The privileged transport may
+    // attach a manager-read snapshot for this endpoint; never document.cookie.
         return {
       url: `${target.origin}/api/v3/lesson/checkin`,
       headers: headers,
@@ -1418,7 +1419,7 @@
     });
     root$5.querySelector("#ykt-btn-export-diag")?.addEventListener("click", () => {
       downloadDiagnostics({
-        version: "1.22.2-beta.3",
+        version: "1.22.2-beta.4",
         autoAnswer: !!ui.config.autoAnswer,
         autoJoin: !!ui.config.autoJoinEnabled
       });
@@ -4858,13 +4859,19 @@
       signal?.removeEventListener("abort", cancel);
     }
   }
-  const names = [ "sessionid", "csrftoken" ];
   const valid = value => typeof value === "string" && value.length > 0 && value.length < 8192 && !/[\r\n;\0]/.test(value);
+  const validName = name => typeof name === "string" && /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
+  function normalizeSiteAuthorization(value) {
+    if (typeof value !== "string") return "";
+    const token = value.trim().replace(/^Bearer(?:\s+|$)/i, "");
+    if (!token || /^(?:null|undefined)$/i.test(token) || token.length > 65536 || /[^\x21-\x7e]/.test(token)) return "";
+    return `Bearer ${token}`;
+  }
   function selectCheckinSession(origin, visibleCookie = "", cookies = []) {
     const target = new URL("/api/v3/lesson/checkin", origin);
-    const values = readCheckinCookies(visibleCookie), selected = {};
+    const values = readCheckinCookies(visibleCookie), rows = [];
     for (const row of Array.isArray(cookies) ? cookies : []) {
-      if (!names.includes(row?.name) || !valid(row.value)) continue;
+      if (!validName(row?.name) || !valid(row.value)) continue;
       const domain = String(row.domain || target.hostname).replace(/^\./, "").toLowerCase();
       if (row.hostOnly ? domain !== target.hostname : target.hostname !== domain && !target.hostname.endsWith(`.${domain}`)) continue;
       const path = row.path || "/";
@@ -4876,18 +4883,27 @@
       } catch {
         continue;
       }
-      if (!selected[row.name] || path.length > (selected[row.name].path || "/").length) selected[row.name] = row;
+      rows.push(row);
     }
-    for (const name of names) {
-      if (selected[name]) values[name] = selected[name].value;
+    // Like a browser Cookie header, put more specific paths first and retain
+    // applicable companion cookies rather than guessing an authentication list.
+        rows.sort((a, b) => (b.path || "/").length - (a.path || "/").length);
+    const selected = new Map;
+    for (const row of rows) if (!selected.has(row.name)) selected.set(row.name, row);
+    for (const name of [ "sessionid", "csrftoken" ]) {
+      if (selected.has(name)) values[name] = selected.get(name).value;
       if (!valid(values[name])) delete values[name];
     }
     return {
       sessionid: values.sessionid || "",
       csrftoken: values.csrftoken || "",
-      // Merge only the authentication cookies into the manager's complete jar.
-      cookie: names.filter(name => selected[name]).map(name => `${name}=${selected[name].value}`).join("; "),
-      source: selected.sessionid ? "gm-cookie" : values.sessionid ? "document" : "jar-only"
+      // Only an endpoint-scoped manager snapshot that includes the session may
+      // be sent explicitly; document.cookie alone is never treated as complete.
+      cookie: selected.has("sessionid") ? rows.map(row => `${row.name}=${row.value}`).join("; ") : "",
+      source: selected.has("sessionid") ? "gm-cookie" : values.sessionid ? "document" : "jar-only",
+      signedSessionAvailable: selected.has("sessionid_sign"),
+      cookieCount: rows.length,
+      httpOnlyCookieCount: rows.filter(row => row.httpOnly).length
     };
   }
   function resolveCheckinSession({timeout: timeout = 1500, signal: signal, guard: guard}) {
@@ -4924,9 +4940,10 @@
         once: true
       });
       try {
-        // Use the current matched page; the API checks the script's URL access.
+        // Cookie paths are evaluated against the actual target, not the lesson
+        // document. The metadata explicitly grants access to this exact path.
         const details = {
-          url: location.href
+          url: new URL("/api/v3/lesson/checkin", location.origin).href
         };
         const result = api === callbackApi ? api.list(details, (rows, error) => finish(error ? [] : rows, error ? "denied" : "available")) : api.list(details);
         if (result?.then) result.then(rows => finish(rows, "available"), () => finish([], "denied"));
@@ -4981,10 +4998,20 @@
       });
       try {
         guard();
+      } catch (error) {
+        finish(error);
+        return;
+      }
+      try {
         handle = gm.xhr({
           method: "POST",
           url: request.url,
-          headers: request.headers,
+          headers: {
+            ...request.headers,
+            ...request.cookie ? {
+              Cookie: request.cookie
+            } : {}
+          },
           data: JSON.stringify(request.payload),
           timeout: timeout,
           anonymous: false,
@@ -5020,8 +5047,10 @@
             unknown: true
           }))
         });
-      } catch (error) {
-        finish(error);
+      } catch {
+        finish(new CheckinError("客户端请求初始化失败，签到结果待核实", {
+          unknown: true
+        }));
       }
     });
   }
@@ -5164,8 +5193,12 @@
             lessonId: id,
             source: session.source,
             cookieApi: session.cookieApi,
+            cookieQuery: "checkin-endpoint",
             sessionHeaderAvailable: !!session.sessionid,
-            csrfHeaderAvailable: !!session.csrftoken
+            csrfHeaderAvailable: !!session.csrftoken,
+            signedSessionAvailable: session.signedSessionAvailable,
+            cookieCount: session.cookieCount,
+            httpOnlyCookieCount: session.httpOnlyCookieCount
           });
         }
         const request = buildCheckinRequest({
@@ -5178,6 +5211,12 @@
         if (session?.sessionid) request.headers.sessionid = session.sessionid;
         if (session?.csrftoken) request.headers["x-csrftoken"] = session.csrftoken;
         if (session?.cookie) request.cookie = session.cookie;
+        // Reuse the same current-site bearer already used by the website and
+        // answer client. Do not overwrite storage with a lesson-scoped token.
+                try {
+          const authorization = normalizeSiteAuthorization(localStorage.getItem("Authorization"));
+          if (authorization) request.headers.Authorization = authorization;
+        } catch {}
         stage = "checkin";
         changed(id, "signing", {
           channel: channel,
@@ -5190,7 +5229,9 @@
         diag("checkin-start", {
           lessonId: id,
           channel: channel,
-          transport: transport
+          transport: transport,
+          authorizationAvailable: !!request.headers.Authorization,
+          explicitCookieAvailable: !!request.cookie
         });
         const sendGuard = () => {
           guard();
@@ -7555,7 +7596,7 @@
     if (desktopStarted) return;
     desktopStarted = true;
     diag("boot", {
-      version: "1.22.2-beta.3",
+      version: "1.22.2-beta.4",
       readyState: INJECTED_READY_STATE,
       autoAnswer: !!ui.config.autoAnswer
     });
@@ -7563,10 +7604,10 @@
       // 控制台：__yktHelperDiag.download() 导出诊断日志
       (gm.uw || window).__yktHelperDiag = {
         dump: () => exportDiagnostics({
-          version: "1.22.2-beta.3"
+          version: "1.22.2-beta.4"
         }),
         download: () => downloadDiagnostics({
-          version: "1.22.2-beta.3"
+          version: "1.22.2-beta.4"
         }),
         clear: clearDiagnostics
       };
@@ -7619,6 +7660,9 @@
     target.addEventListener?.("hashchange", routeChanged);
   }
   (function main() {
+    // This match grants the cookie reader access to the target URL. A directly
+    // opened JSON endpoint must not start the classroom UI or install hooks.
+    if (window.location.pathname === "/api/v3/lesson/checkin") return;
     const targetWindow = gm.uw || window;
     const guard = installDesktopRouteGuard({
       targetWindow: targetWindow,

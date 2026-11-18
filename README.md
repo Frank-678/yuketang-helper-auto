@@ -2,9 +2,11 @@
 
 课堂提醒、课件浏览、AI 辅助分析与可配置的作答流程。继承自 [ZaytsevZY/yuketang-helper-auto](https://github.com/ZaytsevZY/yuketang-helper-auto)，MIT 许可。
 
-当前分支：**`feat/dynamic-qr-checkin`**，测试版本 **1.22.2-beta.3**。源码入口为 `ykt-helper/src/index.js`。
+当前分支：**`feat/dynamic-qr-checkin`**，测试版本 **1.22.2-beta.4**。源码入口为 `ykt-helper/src/index.js`。
 
 本分支新增动态码课堂免扫码签到。协议依据、已实现功能和验证边界见 [动态码实施记录](docs/dynamic-qr-checkin.md)。
+
+beta.4 针对“sessionid 已读取、签到仍返回 50000”的后续反馈，按实际签到接口路径读取同站 Cookie，保留 sessionid_sign 等配套字段，并携带网页已有 Authorization。GM 请求使用管理器读取的 Cookie 快照，网页重试继续由浏览器携带 Cookie；凭据不进入诊断。真实课堂仍待复测。
 
 beta.3 针对“本人资料能读取、签到仍返回 50000”的实测反馈，补充当前站点会话凭据桥接，并在明确鉴权拒绝后用网页登录态重试一次。两种请求都失败时保留实际错误，不再直接断言网页登录失效。当前仍待实机签到验收。
 
@@ -15,7 +17,7 @@ beta.2 修复已登录网页缺少 `user_id` Cookie 时无法识别账号的问�
 ## 安装
 
 1. 在 Chrome / Edge 安装 [Tampermonkey](https://www.tampermonkey.net/)，允许用户脚本运行。
-2. 在脚本管理器中导入本分支的 [ykt-helper-dynamic-qr.user.js](release/ykt-helper-dynamic-qr.user.js)。固定副本为 [ykt-helper-1222-beta3.user.js](release/ykt-helper-1222-beta3.user.js)。
+2. 在脚本管理器中导入本分支的 [ykt-helper-dynamic-qr.user.js](release/ykt-helper-dynamic-qr.user.js)。固定副本为 [ykt-helper-1222-beta4.user.js](release/ykt-helper-1222-beta4.user.js)。
 3. 登录雨课堂，在助手设置中填写自己的模型接口、API Key 和模型 ID。
 4. 打开工具栏的二维码图标，启用“动态码课堂免扫码签到”；需要自动运行时，再开启“开课后自动签到并进入课堂”。也可对当前课堂点击“立即签到”。
 5. 面板显示服务器确认、实际错误码与课堂连接状态。已有登录态失效时，先在官网重新登录。
@@ -28,7 +30,7 @@ beta.2 修复已登录网页缺少 `user_id` Cookie 时无法识别账号的问�
 
 Tampermonkey 用户先检查：管理面板 → 设置 → `Config Mode` 设为 `Advanced` → `Security` → `Allow scripts to access cookies` 设为 `All`，保存后刷新课堂页，再点“立即签到”。维护者说明正式版默认只返回非 HttpOnly Cookie，这个选项可开放读取：[官方说明](https://github.com/Tampermonkey/tampermonkey/issues/465)。该设置影响已获得 Cookie 权限的脚本。
 
-继续使用 beta.3 即可验证：先看新诊断中的 `sessionHeaderAvailable` 是否变为 `true`，再看签到接口实际结果。它变为 true 只说明会话头已补齐，不等于签到已成功。如果选项不存在或已经设为 All 仍读不到，需进一步核查脚本管理器名称/版本及 Cookie 路径、分区，不能仅凭 50000 判定原因。无需提供 Cookie 值。
+先看新诊断中的 `sessionHeaderAvailable` 是否为 `true`，再看签到接口实际结果。它为 true 只说明会话头已补齐，不等于签到已成功。后续实测已确认 beta.3 在权限开放后能读取 sessionid，但仍返回 50000；这种情况使用 beta.4 的凭据封装修正继续验证。新版还记录 `signedSessionAvailable`、`authorizationAvailable` 和 Cookie 数量，不记录其值。如果选项不存在或已经设为 All 仍读不到会话，需进一步核查脚本管理器名称/版本及 Cookie 路径、分区。无需提供 Cookie 值。
 
 ## 答案与提交
 
@@ -88,7 +90,7 @@ npm ci
 npm test
 ```
 
-修改源码后运行 `npm run release` 同步发布副本。`npm test` 先构建实际安装产物，再运行模块测试和 JSDOM 组合回归。生成文件为 `ykt-helper/dist/ykt-helper-1222-beta3.user.js`，发布时同步到 `release/ykt-helper-1222-beta3.user.js` 和 `release/ykt-helper-dynamic-qr.user.js`。
+修改源码后运行 `npm run release` 同步发布副本。`npm test` 先构建实际安装产物，再运行模块测试和 JSDOM 组合回归。生成文件为 `ykt-helper/dist/ykt-helper-1222-beta4.user.js`，发布时同步到 `release/ykt-helper-1222-beta4.user.js` 和 `release/ykt-helper-dynamic-qr.user.js`。
 
 隔离测试不代表真实课堂全环境验收。服务器接口/改答权限、真实图片 CORS、Android/Tampermonkey、系统权限、后台冻结与模型答案正确率仍取决于实际环境。当前不提供服务器无人值守程序、手机号密码自动登录、整份考试试卷的通用提交。动态码签到通道已经实现，仍需要目标课堂的实际服务器验收。
 

@@ -2,6 +2,7 @@ import { gm } from '../core/env.js';
 import { CheckinError, buildCheckinRequest, parseCheckinResponse } from '../core/checkin-protocol.js';
 import { resolveCurrentUserIdentity } from './current-user.js';
 import { resolveCheckinSession } from './checkin-session.js';
+import { normalizeSiteAuthorization } from '../core/checkin-session.js';
 import { repo } from '../state/repo.js';
 import { diag } from '../core/diagnostics.js';
 
@@ -23,10 +24,10 @@ function requestAppCheckin(request, { timeout, signal, guard }) {
     const timer = setTimeout(() => { finish(new CheckinError('签到请求超时，结果待核实', { unknown: true })); handle?.abort?.(); }, timeout);
     if (signal?.aborted) { cancel(); return; }
     signal?.addEventListener('abort', cancel, { once: true });
+    try { guard(); } catch (error) { finish(error); return; }
     try {
-      guard();
       handle = gm.xhr({
-        method: 'POST', url: request.url, headers: request.headers, data: JSON.stringify(request.payload),
+        method: 'POST', url: request.url, headers: { ...request.headers, ...(request.cookie ? { Cookie: request.cookie } : {}) }, data: JSON.stringify(request.payload),
         timeout, anonymous: false, cookiePartition: { topLevelSite: 'https://yuketang.cn' },
         ...(request.cookie ? { cookie: request.cookie } : {}),
         onload: response => {
@@ -39,7 +40,7 @@ function requestAppCheckin(request, { timeout, signal, guard }) {
         ontimeout: () => finish(new CheckinError('签到请求超时，结果待核实', { unknown: true })),
         onabort: () => finish(new CheckinError('签到请求已取消', { unknown: true })),
       });
-    } catch (error) { finish(error); }
+    } catch { finish(new CheckinError('客户端请求初始化失败，签到结果待核实', { unknown: true })); }
   });
 }
 
@@ -101,15 +102,18 @@ export function requestLessonCheckin(lessonId, options = {}) {
         changed(id, 'preparing', { channel, stage });
         session = await resolveCheckinSession({ timeout: Math.min(1500, remaining()), signal: options.signal, guard });
         guard();
-        diag('checkin-session-ready', { lessonId: id, source: session.source, cookieApi: session.cookieApi, sessionHeaderAvailable: !!session.sessionid, csrfHeaderAvailable: !!session.csrftoken });
+        diag('checkin-session-ready', { lessonId: id, source: session.source, cookieApi: session.cookieApi, cookieQuery: 'checkin-endpoint', sessionHeaderAvailable: !!session.sessionid, csrfHeaderAvailable: !!session.csrftoken, signedSessionAvailable: session.signedSessionAvailable, cookieCount: session.cookieCount, httpOnlyCookieCount: session.httpOnlyCookieCount });
       }
       const request = buildCheckinRequest({ origin: location.origin, lessonId: id, userId: identity?.userId, cookie: document.cookie, channel });
       if (session?.sessionid) request.headers.sessionid = session.sessionid;
       if (session?.csrftoken) request.headers['x-csrftoken'] = session.csrftoken;
       if (session?.cookie) request.cookie = session.cookie;
+      // Reuse the same current-site bearer already used by the website and
+      // answer client. Do not overwrite storage with a lesson-scoped token.
+      try { const authorization = normalizeSiteAuthorization(localStorage.getItem('Authorization')); if (authorization) request.headers.Authorization = authorization; } catch {}
       stage = 'checkin';
       changed(id, 'signing', { channel, stage, transport, code: null, lastError: '', nextAttemptAt: 0 });
-      diag('checkin-start', { lessonId: id, channel, transport });
+      diag('checkin-start', { lessonId: id, channel, transport, authorizationAvailable: !!request.headers.Authorization, explicitCookieAvailable: !!request.cookie });
       const sendGuard = () => { guard(); requestSent = true; };
       let response = await (channel === 'app' ? requestAppCheckin : requestWebCheckin)(request, { timeout: remaining(), signal: options.signal, guard: sendGuard });
       if (repo.accountId !== accountId) throw new CheckinError('账号已变化，旧签到结果已丢弃');

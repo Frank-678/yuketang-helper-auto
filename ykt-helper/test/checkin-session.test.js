@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selectCheckinSession } from '../src/core/checkin-session.js';
+import { selectCheckinSession, normalizeSiteAuthorization } from '../src/core/checkin-session.js';
+import fs from 'node:fs';
 import { parseCurrentUserResponse } from '../src/core/current-user.js';
 import { environment, tick } from './helpers/runtime.js';
 
@@ -10,10 +11,10 @@ const reply = (body, status = 200) => ({ status, text: async () => JSON.stringif
 const refused = opt => opt.onload({ status: 200, responseText: '{"code":50000,"msg":"UNAUTHENTICATED"}' });
 const noUid = e => { e.w.document.cookie = 'user_id=; Max-Age=0'; };
 
-test('session selection keeps only current-site authentication cookies and the most specific applicable path', () => {
-  const selected = selectCheckinSession(origin, 'sessionid=visible; csrftoken=visible-csrf', [cookie('sessionid', 'root'), cookie('sessionid', 'api-session', { path: '/api' }), cookie('sessionid', 'other-page', { path: '/web' }), cookie('sessionid', 'other-host', { domain: 'pro.yuketang.cn' }), cookie('sessionid', 'attacker', { domain: '.example.test' }), cookie('sessionid', 'expired', { expirationDate: 1 }), cookie('password', 'unrelated-secret'), cookie('csrftoken', 'csrf')]);
+test('session selection retains all applicable same-site cookies with more specific paths first', () => {
+  const selected = selectCheckinSession(origin, 'sessionid=visible; csrftoken=visible-csrf', [cookie('sessionid', 'root'), cookie('sessionid', 'api-session', { path: '/api' }), cookie('sessionid', 'other-page', { path: '/web' }), cookie('sessionid', 'other-host', { domain: 'pro.yuketang.cn' }), cookie('sessionid', 'attacker', { domain: '.example.test' }), cookie('sessionid', 'expired', { expirationDate: 1 }), cookie('routing_hint', 'same-site-value'), cookie('csrftoken', 'csrf')]);
   assert.equal(selected.sessionid, 'api-session'); assert.equal(selected.csrftoken, 'csrf');
-  assert.equal(selected.cookie, 'sessionid=api-session; csrftoken=csrf'); assert.equal(selected.source, 'gm-cookie');
+  assert.equal(selected.cookie, 'sessionid=api-session; sessionid=root; routing_hint=same-site-value; csrftoken=csrf'); assert.equal(selected.source, 'gm-cookie');
 });
 
 test('invalid values and unrelated partition keys are never put in a session header', () => {
@@ -25,16 +26,83 @@ test('current-user profile field precedence matches the verified client contract
   assert.equal(parseCurrentUserResponse({ data: { user_profile: { id: 'official-user', uid: 'unrelated-alias' } } }), 'official-user');
 });
 
-test('a manager-readable HttpOnly session is passed in the app header and merged without replacing the full cookie jar', async t => {
+test('a manager-readable endpoint session retains its signature and companion cookies in the privileged request', async t => {
   const e = environment(t); let details;
-  e.w.GM_cookie = { list(d, cb) { details = d; cb([cookie('sessionid', 'private-session'), cookie('csrftoken', 'private-csrf'), cookie('password', 'private-other')], null); } };
+  e.w.GM_cookie = { list(d, cb) { details = d; cb([cookie('sessionid', 'private-session'), cookie('csrftoken', 'private-csrf'), cookie('sessionid_sign', 'private-signature'), cookie('routing_hint', 'private-other')], null); } };
   await e.a.requestLessonCheckin('L1');
-  const request = e.gmRequests[0]; assert.equal(details.url, e.w.location.href); assert.equal(request.headers.sessionid, 'private-session'); assert.equal(request.headers['x-csrftoken'], 'private-csrf');
-  assert.equal(request.cookie, 'sessionid=private-session; csrftoken=private-csrf'); assert.equal(request.headers.Cookie, undefined); assert.equal(request.anonymous, false);
+  const request = e.gmRequests[0]; assert.equal(details.url, origin + '/api/v3/lesson/checkin'); assert.equal(request.headers.sessionid, 'private-session'); assert.equal(request.headers['x-csrftoken'], 'private-csrf');
+  assert.equal(request.cookie, 'sessionid=private-session; csrftoken=private-csrf; sessionid_sign=private-signature; routing_hint=private-other'); assert.equal(request.headers.Cookie, request.cookie); assert.equal(request.anonymous, false);
   assert.equal(request.cookiePartition.topLevelSite, 'https://yuketang.cn');
-  assert.doesNotMatch(e.a.exportDiagnostics(), /private-session|private-csrf|private-other/); assert.match(e.a.exportDiagnostics(), /"sessionHeaderAvailable":true/);
+  assert.doesNotMatch(e.a.exportDiagnostics(), /private-session|private-csrf|private-signature|private-other/); assert.match(e.a.exportDiagnostics(), /"sessionHeaderAvailable":true/); assert.match(e.a.exportDiagnostics(), /"signedSessionAvailable":true/);
   const stored = [...Array(e.w.localStorage.length)].map((_, i) => e.w.localStorage.getItem(e.w.localStorage.key(i))).join('\n');
-  assert.doesNotMatch(stored, /private-session|private-csrf|private-other/);
+  assert.doesNotMatch(stored, /private-session|private-csrf|private-signature|private-other/);
+});
+
+test('site bearer normalization keeps one prefix and rejects invalid header values', () => {
+  assert.equal(normalizeSiteAuthorization('site-token'), 'Bearer site-token'); assert.equal(normalizeSiteAuthorization(' Bearer site-token '), 'Bearer site-token');
+  for (const value of [null, {}, false, '', 'null', 'undefined', 'Bearer ', 'Bearer Bearer site-token', 'x\r\ny', '中文']) assert.equal(normalizeSiteAuthorization(value), '');
+});
+
+test('a session requiring the signature, companion cookie and existing site bearer is forwarded intact', async t => {
+  const e = environment(t, {}, { onCheckin: opt => {
+    if (opt.headers.Authorization === 'Bearer private-site-token' && opt.headers.Cookie?.includes('sessionid_sign=private-sign') && opt.headers.Cookie?.includes('routing_hint=private-route')) opt.onload({ status: 200, responseText: '{"code":0,"data":{"lessonToken":"signed-session-token"}}' });
+    else refused(opt);
+  } });
+  e.w.localStorage.setItem('Authorization', 'private-site-token');
+  e.w.GM_cookie = { list(_, cb) { cb([cookie('sessionid', 'private-sid'), cookie('sessionid_sign', 'private-sign'), cookie('routing_hint', 'private-route')]); } };
+  const result = await e.a.requestLessonCheckin('L1'); assert.equal(result.confirmed, true); assert.equal(e.gmRequests.length, 1);
+  assert.equal(e.w.localStorage.getItem('Authorization'), 'private-site-token'); assert.match(e.a.exportDiagnostics(), /"authorizationAvailable":true/);
+  assert.doesNotMatch(e.a.exportDiagnostics(), /private-site-token|private-sid|private-sign|private-route|signed-session-token/);
+});
+
+test('the browser retry retains the current-site bearer while the browser supplies its own cookies', async t => {
+  let headers;
+  const e = environment(t, {}, { onCheckin: refused, fetch: async (_, init) => { headers = init.headers; return reply({ code: 0, data: { lessonToken: 'browser-token' } }); } });
+  e.w.localStorage.setItem('Authorization', 'Bearer existing-site-token');
+  e.w.GM_cookie = { list(_, cb) { cb([cookie('sessionid', 'sid'), cookie('sessionid_sign', 'sign')]); } };
+  await e.a.requestLessonCheckin('L1'); assert.equal(headers.Authorization, 'Bearer existing-site-token'); assert.equal(headers.Cookie, undefined);
+  assert.equal(headers['User-Agent'], undefined); assert.equal(e.gmRequests[0].headers.Authorization, 'Bearer existing-site-token');
+});
+
+test('ordinary checkin also reuses the site bearer without requesting privileged cookies', async t => {
+  let init; const e = environment(t, {}, { fetch: async (_, options) => { init = options; return reply({ code: 0, data: { lessonToken: 'web-token' } }); } });
+  e.w.localStorage.setItem('Authorization', 'existing-web-token'); e.w.GM_cookie = { list() { throw new Error('must not be called'); } };
+  await e.a.requestLessonCheckin('L1', { channel: 'web' }); assert.equal(init.headers.Authorization, 'Bearer existing-web-token'); assert.equal(init.headers.Cookie, undefined);
+  assert.equal(JSON.parse(init.body).source, 9); assert.equal(e.gmRequests.length, 0);
+});
+
+test('cookie lookup uses the API path rather than taking an unrelated lesson-page session', async t => {
+  const e = environment(t); e.w.GM_cookie = { list(details, cb) {
+    cb(details.url.endsWith('/api/v3/lesson/checkin') ? [cookie('sessionid', 'api-session', { path: '/api' }), cookie('sessionid_sign', 'api-signature', { path: '/api' })] : [cookie('sessionid', 'lesson-session', { path: '/lesson' })]);
+  } };
+  await e.a.requestLessonCheckin('L1'); assert.equal(e.gmRequests[0].headers.sessionid, 'api-session'); assert.match(e.gmRequests[0].headers.Cookie, /sessionid_sign=api-signature/);
+});
+
+test('a partial cookie snapshot cannot replace the browser jar even when document.cookie contains a session', async t => {
+  const e = environment(t); e.w.document.cookie = 'sessionid=visible-only'; e.w.GM_cookie = { list(_, cb) { cb([cookie('csrftoken', 'csrf-only')]); } };
+  await e.a.requestLessonCheckin('L1'); assert.equal(e.gmRequests[0].headers.sessionid, 'visible-only');
+  assert.equal(e.gmRequests[0].headers.Cookie, undefined); assert.equal(e.gmRequests[0].cookie, undefined);
+});
+
+test('companion cookies from other hosts, paths and partitions cannot enter the full cookie header', () => {
+  const selected = selectCheckinSession(origin, '', [cookie('sessionid', 'current'), cookie('sessionid_sign', 'wrong-host', { domain: '.example.test' }), cookie('sessionid_sign', 'wrong-path', { path: '/lesson' }), cookie('sessionid_sign', 'wrong-partition', { partitionKey: { topLevelSite: 'https://example.test' } }), cookie('bad\nname', 'wrong-name')]);
+  assert.equal(selected.cookie, 'sessionid=current'); assert.equal(selected.signedSessionAvailable, false); assert.equal(selected.cookieCount, 1);
+});
+
+test('transport setup exceptions cannot copy a credential-bearing error into diagnostics or UI', async t => {
+  const e = environment(t, {}, { onCheckin() { throw new Error('Invalid Cookie private-session-signature and Bearer private-site-token'); } });
+  e.w.localStorage.setItem('Authorization', 'private-site-token');
+  await assert.rejects(e.a.requestLessonCheckin('L1'), error => error.unknown && !/private-session-signature|private-site-token/.test(error.message));
+  assert.doesNotMatch(e.a.exportDiagnostics(), /private-session-signature|private-site-token/);
+  assert.doesNotMatch(e.a.getLessonCheckinState('L1').lastError, /private-session-signature|private-site-token/);
+});
+
+test('the Cookie API target is explicitly matched without starting a classroom runtime on that JSON endpoint', async t => {
+  const meta = fs.readFileSync(new URL('../userscript.meta.js', import.meta.url), 'utf8');
+  assert.match(meta, /@match\s+https:\/\/\*\.yuketang\.cn\/api\/v3\/lesson\/checkin\s/);
+  const e = environment(t, {}, { fullBoot: true, url: origin + '/api/v3/lesson/checkin' }); await tick();
+  assert.equal(e.w.document.getElementById('ykt-toolbar'), null); assert.equal(e.w.__yktHelperDiag, undefined);
+  assert.equal(e.w.XMLHttpRequest.prototype.__yktInstalled, undefined); assert.equal(e.w.fetch.__yktInstalled, undefined);
 });
 
 test('promise-based cookie APIs can supply the same current-site session', async t => {

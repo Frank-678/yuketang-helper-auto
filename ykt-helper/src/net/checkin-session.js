@@ -18,8 +18,9 @@ export function resolveCheckinSession({ timeout = 1500, signal, guard }) {
     const timer = setTimeout(() => finish([], 'timeout'), timeout);
     signal?.addEventListener('abort', cancel, { once: true });
     try {
-      // Use the current matched page; the API checks the script's URL access.
-      const details = { url: location.href };
+      // Cookie paths are evaluated against the actual target, not the lesson
+      // document. The metadata explicitly grants access to this exact path.
+      const details = { url: new URL('/api/v3/lesson/checkin', location.origin).href };
       const result = api === callbackApi ? api.list(details, (rows, error) => finish(error ? [] : rows, error ? 'denied' : 'available')) : api.list(details);
       if (result?.then) result.then(rows => finish(rows, 'available'), () => finish([], 'denied'));
     } catch { finish([], 'denied'); }

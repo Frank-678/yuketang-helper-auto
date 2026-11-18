@@ -36,8 +36,8 @@ export function buildCheckinRequest({ origin, lessonId, userId, cookie = '', cha
       incremental: '14624737', isphysicaldevice: 'true',
     });
   } else headers['x-client'] = 'h5';
-  // Let the browser/script manager send its full cookie jar. Explicitly setting
-  // document.cookie would drop HttpOnly cookies and can break valid sessions.
+  // Browser requests use their own cookie jar. The privileged transport may
+  // attach a manager-read snapshot for this endpoint; never document.cookie.
   return { url: `${target.origin}/api/v3/lesson/checkin`, headers, payload: { source: channel === 'app' ? 21 : 9, lessonId: id, joinIfNotIn: true } };
 }
 
