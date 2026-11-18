@@ -33,6 +33,7 @@ test('a manager-readable endpoint session retains its signature and companion co
   const request = e.gmRequests[0]; assert.equal(details.url, origin + '/api/v3/lesson/checkin'); assert.equal(request.headers.sessionid, 'private-session'); assert.equal(request.headers['x-csrftoken'], 'private-csrf');
   assert.equal(request.cookie, 'sessionid=private-session; csrftoken=private-csrf; sessionid_sign=private-signature; routing_hint=private-other'); assert.equal(request.headers.Cookie, request.cookie); assert.equal(request.anonymous, false);
   assert.equal(request.cookiePartition.topLevelSite, 'https://yuketang.cn');
+  assert.equal(request.redirect, 'error');
   assert.doesNotMatch(e.a.exportDiagnostics(), /private-session|private-csrf|private-signature|private-other/); assert.match(e.a.exportDiagnostics(), /"sessionHeaderAvailable":true/); assert.match(e.a.exportDiagnostics(), /"signedSessionAvailable":true/);
   const stored = [...Array(e.w.localStorage.length)].map((_, i) => e.w.localStorage.getItem(e.w.localStorage.key(i))).join('\n');
   assert.doesNotMatch(stored, /private-session|private-csrf|private-signature|private-other/);

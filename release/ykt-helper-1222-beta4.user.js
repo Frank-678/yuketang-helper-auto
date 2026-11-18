@@ -5015,6 +5015,7 @@
           data: JSON.stringify(request.payload),
           timeout: timeout,
           anonymous: false,
+          redirect: "error",
           cookiePartition: {
             topLevelSite: "https://yuketang.cn"
           },

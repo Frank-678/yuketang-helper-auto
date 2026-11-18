@@ -61,6 +61,8 @@ beta.2 在 Cookie 和页面用户对象没有 ID 时，使用当前网页的完�
 3. 在 GM 及网页请求中携带当前站点 localStorage 中已有的 Authorization，规范为一个 Bearer 前缀，拒绝无效头值。没有这个值时不生成或猜测凭据；也不将新课堂的 Set-Auth 写回全局存储。
 4. 增加 `signedSessionAvailable`、`authorizationAvailable`、Cookie 数量和查询目标类别等诊断，不记录 Cookie、Bearer 或课堂 Token 的值；管理器初始化错误也不会将带凭据的原始异常写入日志。
 
+GM 和网页请求都使用拒绝重定向的模式，避免带凭据的请求跟随到其他地址；保留独立超时计时器，不依赖管理器具体网络实现的 timeout 行为。
+
 依据：上述公开原生客户端的 Cookie 请求结构；现有 `tsm/answer.js` 的站点 Authorization 使用方式；上游 [会话请求头实现](https://github.com/ZaytsevZY/yuketang-helper-auto/blob/6eaf8b4e3ff68beeb3b1007c1515535c1dfed2fd/ykt-helper-desktop/packages/routing/src/active/session-manager.ts) 和 [网页凭据读取](https://github.com/ZaytsevZY/yuketang-helper-auto/blob/6eaf8b4e3ff68beeb3b1007c1515535c1dfed2fd/ykt-helper-desktop/apps/desktop/main/electron-session-credentials.ts)。这些实现差异可由代码确认，但当前用户日志没有包含服务器实际所需的全部字段，所以不能断言它们就是 50000 的唯一原因。
 
 本轮浏览器连接未提供来源上下文，无法直接读取用户一侧的实时请求。新增回归验证凭据的完整传递、同站限制、重试和日志脱敏；模拟服务器接受完整凭据仅证明转发逻辑正确，beta.4 仍需同一环境的真实签到响应确认。

@@ -28,7 +28,7 @@ function requestAppCheckin(request, { timeout, signal, guard }) {
     try {
       handle = gm.xhr({
         method: 'POST', url: request.url, headers: { ...request.headers, ...(request.cookie ? { Cookie: request.cookie } : {}) }, data: JSON.stringify(request.payload),
-        timeout, anonymous: false, cookiePartition: { topLevelSite: 'https://yuketang.cn' },
+        timeout, anonymous: false, redirect: 'error', cookiePartition: { topLevelSite: 'https://yuketang.cn' },
         ...(request.cookie ? { cookie: request.cookie } : {}),
         onload: response => {
           try {
