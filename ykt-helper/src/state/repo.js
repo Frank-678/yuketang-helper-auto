@@ -1,5 +1,7 @@
 import { storage } from '../core/storage.js';
 import { hasSubmittedAnswer } from '../core/answer-state.js';
+import { readPageUserIdentity } from '../core/current-user.js';
+import { gm } from '../core/env.js';
 
 export class IdMap extends Map {
   get(k) { return super.get(String(k)); }
@@ -9,10 +11,11 @@ export class IdMap extends Map {
 }
 function accountScope() {
   try {
-    const uid = document.cookie.match(/(?:^|;\s*)user_id=([^;]+)/)?.[1];
+    const uid = readPageUserIdentity(document.cookie, gm.uw)?.userId;
     if (uid) return `user-${uid}`;
     // The token is never persisted in a task key or diagnostic record.
-    const token = localStorage.getItem('Authorization') || '';
+    const session = document.cookie.match(/(?:^|;\s*)sessionid=([^;]+)/)?.[1];
+    const token = (localStorage.getItem('Authorization') || '') + (session ? `\0${session}` : '');
     let hash = 2166136261;
     for (const c of token) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
     return token ? `session-${hash >>> 0}` : 'anonymous';

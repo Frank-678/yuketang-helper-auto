@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI雨课堂助手（JS版）
 // @namespace    https://github.com/ZaytsevZY/yuketang-helper-auto
-// @version      1.22.2-beta.1
+// @version      1.22.2-beta.2
 // @homepageURL  https://github.com/Frank-678/yuketang-helper-auto
 // @downloadURL  https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
 // @updateURL    https://raw.githubusercontent.com/Frank-678/yuketang-helper-auto/feat/dynamic-qr-checkin/release/ykt-helper-dynamic-qr.user.js
@@ -402,6 +402,182 @@
     };
     throw new Error("答案格式与题型不符");
   }
+  // Request contracts verified against the publicly distributed 3.0 client.
+  // These fields describe a client protocol; no third-party code or credentials
+  // are bundled with the helper.
+    class CheckinError extends Error {
+    constructor(message, {code: code = null, status: status = 0, unknown: unknown = false} = {}) {
+      super(message);
+      this.name = "CheckinError";
+      this.code = code;
+      this.status = status;
+      this.unknown = unknown;
+    }
+  }
+  function readCheckinCookies(cookie = "") {
+    const out = {};
+    for (const part of String(cookie).split(";")) {
+      const split = part.indexOf("=");
+      if (split > 0) out[part.slice(0, split).trim()] = part.slice(split + 1).trim();
+    }
+    return out;
+  }
+  function buildCheckinRequest({origin: origin, lessonId: lessonId, userId: userId, cookie: cookie = "", channel: channel = "app"}) {
+    const target = new URL(origin);
+    if (target.protocol !== "https:" || !/^(www|pro|changjiang|huanghe)\.yuketang\.cn$/.test(target.hostname) || target.port) throw new CheckinError("当前地址不是支持的雨课堂站点");
+    const id = String(lessonId ?? "").trim();
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new CheckinError("课堂编号无效");
+    if (![ "app", "web" ].includes(channel)) throw new CheckinError("签到通道无效");
+    const cookies = readCheckinCookies(cookie);
+    const headers = {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      xtbz: "ykt"
+    };
+    if (cookies.csrftoken) headers["x-csrftoken"] = cookies.csrftoken;
+    if (cookies.sessionid) headers.sessionid = cookies.sessionid;
+    if (channel === "app") {
+      const uid = String(userId ?? cookies.user_id ?? "").trim();
+      if (!uid || /[\r\n]/.test(uid)) throw new CheckinError("尚未识别当前账号，请先在雨课堂网页完成登录");
+      Object.assign(headers, {
+        "User-Agent": "Android",
+        "x-client": "app",
+        "x-uid": uid,
+        brand: "google Pixel 9 Pro",
+        uuid: "",
+        buildnumber: "1610",
+        xtua: "client=app&tag=1.3.3&platform=Android",
+        systemversion: "16",
+        incremental: "14624737",
+        isphysicaldevice: "true"
+      });
+    } else headers["x-client"] = "h5";
+    // Let the browser/script manager send its full cookie jar. Explicitly setting
+    // document.cookie would drop HttpOnly cookies and can break valid sessions.
+        return {
+      url: `${target.origin}/api/v3/lesson/checkin`,
+      headers: headers,
+      payload: {
+        source: channel === "app" ? 21 : 9,
+        lessonId: id,
+        joinIfNotIn: true
+      }
+    };
+  }
+  function parseCheckinResponse({status: status, body: body, headers: headers = "", lessonId: lessonId, channel: channel}) {
+    if (!(status >= 200 && status < 300)) throw new CheckinError(`签到请求 HTTP ${status}`, {
+      status: status,
+      unknown: !status || status >= 500
+    });
+    let json;
+    try {
+      json = typeof body === "string" ? JSON.parse(body) : body;
+    } catch {
+      throw new CheckinError("签到响应无法解析，结果待核实", {
+        status: status,
+        unknown: true
+      });
+    }
+    if (!json || typeof json !== "object" || ![ "number", "string" ].includes(typeof json.code) || String(json.code).trim() === "") throw new CheckinError("服务器未返回明确签到结果", {
+      status: status,
+      unknown: true
+    });
+    const code = Number(json.code);
+    if (code !== 0) {
+      const reason = code === 50070 ? "服务器仍要求动态二维码验证" : code === 5e4 || code === 401 ? "雨课堂登录已失效，请重新登录" : String(json.msg || json.message || "服务器拒绝签到").slice(0, 120);
+      throw new CheckinError(`${reason}（${json.code}）`, {
+        code: Number.isFinite(code) ? code : String(json.code),
+        status: status
+      });
+    }
+    const data = json.data ?? json.result;
+    if (json.success === false || data?.checkedIn === false || data?.isCheckedIn === false || data?.is_checked_in === false) throw new CheckinError("服务器未确认签到完成，结果待核实", {
+      status: status,
+      unknown: true
+    });
+    const token = data?.lessonToken;
+    if (typeof token !== "string" || !token.trim()) throw new CheckinError("服务器返回成功，但缺少课堂凭据，签到结果待核实", {
+      status: status,
+      unknown: true
+    });
+    const returnedLesson = data.lessonId ?? data.lesson_id;
+    if (returnedLesson != null && String(returnedLesson) !== String(lessonId)) throw new CheckinError("服务器返回了另一课堂的凭据", {
+      status: status,
+      unknown: true
+    });
+    const bearer = String(headers).match(/^set-auth\s*:\s*([^\r\n]*)/im)?.[1]?.trim() || "";
+    return {
+      token: token.trim(),
+      setAuth: bearer.replace(/^Bearer\s+/i, ""),
+      lessonId: String(lessonId),
+      channel: channel,
+      confirmed: true,
+      code: 0
+    };
+  }
+  function normalizeUserId(value) {
+    if (typeof value === "number" && (!Number.isSafeInteger(value) || value <= 0)) return null;
+    if (![ "string", "number" ].includes(typeof value)) return null;
+    const id = String(value).trim();
+    return /^[A-Za-z0-9_-]{1,128}$/.test(id) && !/^(?:0|undefined|null|anonymous)$/i.test(id) && !id.startsWith("u_") ? id : null;
+  }
+  function profileId(profile) {
+    if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
+    for (const key of [ "user_id", "userId", "uid", "id" ]) {
+      const id = normalizeUserId(profile[key]);
+      if (id) return id;
+    }
+    return null;
+  }
+  function readPageUserIdentity(cookie, target) {
+    const cookieId = normalizeUserId(readCheckinCookies(cookie).user_id);
+    if (cookieId) return {
+      userId: cookieId,
+      source: "cookie"
+    };
+    try {
+      const id = profileId(target?.YktUser);
+      if (id) return {
+        userId: id,
+        source: "page-user"
+      };
+      const initial = profileId(target?.__INITIAL_STATE__?.user);
+      if (initial) return {
+        userId: initial,
+        source: "initial-state"
+      };
+    } catch {}
+    return null;
+  }
+  // These are responses from current-user endpoints, never a classroom roster.
+    function parseCurrentUserResponse(body) {
+    let json;
+    try {
+      // JSON numbers can contain long account IDs. Preserve the original digits
+      // before JSON.parse rounds them beyond Number.MAX_SAFE_INTEGER.
+      json = typeof body === "string" ? JSON.parse(body.replace(/("(?:user_id|userId|uid|id)"\s*:\s*)(\d{16,})(?=\s*[,}])/g, '$1"$2"')) : body;
+    } catch {
+      throw new CheckinError("当前账号资料响应无法解析，尚未发送签到请求");
+    }
+    let data = json;
+    for (let depth = 0; depth < 3; depth++) {
+      if (!data || typeof data !== "object" || Array.isArray(data)) break;
+      const code = data.code ?? data.status_code;
+      if (code != null && String(code) !== "0" || data.success === false || data.is_login === false || data.isLogin === false) {
+        const numeric = typeof code === "number" || typeof code === "string" ? Number(code) : NaN;
+        const auth = [ 401, 403, 5e4 ].includes(numeric);
+        throw new CheckinError(auth ? "雨课堂登录已失效，请在官网重新登录" : "当前账号资料接口未返回成功结果", {
+          code: Number.isFinite(numeric) ? numeric : null
+        });
+      }
+      if (data.data != null) data = data.data; else if (data.result != null) data = data.result; else break;
+    }
+    if (data && typeof data === "object" && !Array.isArray(data)) for (const profile of [ data.user_profile, data.user_info, data.user, data.profile, data.userInfo, data.userProfile, data.member, data ]) {
+      const id = profileId(profile);
+      if (id) return id;
+    }
+    throw new CheckinError("当前登录态未能读取账号编号，请返回课程首页刷新后重试；尚未发送签到请求");
+  }
   class IdMap extends Map {
     get(k) {
       return super.get(String(k));
@@ -418,10 +594,11 @@
   }
   function accountScope() {
     try {
-      const uid = document.cookie.match(/(?:^|;\s*)user_id=([^;]+)/)?.[1];
+      const uid = readPageUserIdentity(document.cookie, gm.uw)?.userId;
       if (uid) return `user-${uid}`;
       // The token is never persisted in a task key or diagnostic record.
-            const token = localStorage.getItem("Authorization") || "";
+            const session = document.cookie.match(/(?:^|;\s*)sessionid=([^;]+)/)?.[1];
+      const token = (localStorage.getItem("Authorization") || "") + (session ? `\0${session}` : "");
       let hash = 2166136261;
       for (const c of token) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
       return token ? `session-${hash >>> 0}` : "anonymous";
@@ -1239,7 +1416,7 @@
     });
     root$5.querySelector("#ykt-btn-export-diag")?.addEventListener("click", () => {
       downloadDiagnostics({
-        version: "1.22.2-beta.1",
+        version: "1.22.2-beta.2",
         autoAnswer: !!ui.config.autoAnswer,
         autoJoin: !!ui.config.autoJoinEnabled
       });
@@ -4592,123 +4769,94 @@
       lessonId: lessonId
     });
   }
-  // Request contracts verified against the publicly distributed 3.0 client.
-  // These fields describe a client protocol; no third-party code or credentials
-  // are bundled with the helper.
-    class CheckinError extends Error {
-    constructor(message, {code: code = null, status: status = 0, unknown: unknown = false} = {}) {
-      super(message);
-      this.name = "CheckinError";
-      this.code = code;
-      this.status = status;
-      this.unknown = unknown;
-    }
-  }
-  function readCheckinCookies(cookie = "") {
-    const out = {};
-    for (const part of String(cookie).split(";")) {
-      const split = part.indexOf("=");
-      if (split > 0) out[part.slice(0, split).trim()] = part.slice(split + 1).trim();
-    }
-    return out;
-  }
-  function buildCheckinRequest({origin: origin, lessonId: lessonId, userId: userId, cookie: cookie = "", channel: channel = "app"}) {
-    const target = new URL(origin);
-    if (target.protocol !== "https:" || !/^(www|pro|changjiang|huanghe)\.yuketang\.cn$/.test(target.hostname) || target.port) throw new CheckinError("当前地址不是支持的雨课堂站点");
-    const id = String(lessonId ?? "").trim();
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new CheckinError("课堂编号无效");
-    if (![ "app", "web" ].includes(channel)) throw new CheckinError("签到通道无效");
-    const cookies = readCheckinCookies(cookie);
-    const headers = {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      xtbz: "ykt"
+  // Current-user paths verified in the public 3.0 client's profile lookup.
+    const PROFILE_PATHS = [ "/v/course_meta/user_info", "/api/v3/user/profile", "/v2/api/web/userinfo" ];
+  async function resolveCurrentUserIdentity({timeout: timeout = 6e3, signal: signal, guard: guard}) {
+    guard();
+    if (signal?.aborted) throw new CheckinError("读取当前账号已取消，尚未发送签到请求");
+    const known = readPageUserIdentity(document.cookie, gm.uw);
+    if (known) return known;
+    const origin = location.origin, controller = new AbortController;
+    let stopped, rejectStop, timer;
+    const stopPromise = new Promise((_, reject) => {
+      rejectStop = reject;
+    });
+    const stop = error => {
+      stopped = error;
+      controller.abort();
+      rejectStop(error);
     };
-    if (cookies.csrftoken) headers["x-csrftoken"] = cookies.csrftoken;
-    if (cookies.sessionid) headers.sessionid = cookies.sessionid;
-    if (channel === "app") {
-      const uid = String(userId ?? cookies.user_id ?? "").trim();
-      if (!uid || /[\r\n]/.test(uid)) throw new CheckinError("尚未识别当前账号，请先在雨课堂网页完成登录");
-      Object.assign(headers, {
-        "User-Agent": "Android",
-        "x-client": "app",
-        "x-uid": uid,
-        brand: "google Pixel 9 Pro",
-        uuid: "",
-        buildnumber: "1610",
-        xtua: "client=app&tag=1.3.3&platform=Android",
-        systemversion: "16",
-        incremental: "14624737",
-        isphysicaldevice: "true"
-      });
-    } else headers["x-client"] = "h5";
-    // Let the browser/script manager send its full cookie jar. Explicitly setting
-    // document.cookie would drop HttpOnly cookies and can break valid sessions.
-        return {
-      url: `${target.origin}/api/v3/lesson/checkin`,
-      headers: headers,
-      payload: {
-        source: channel === "app" ? 21 : 9,
-        lessonId: id,
-        joinIfNotIn: true
+    const cancel = () => stop(new CheckinError("读取当前账号已取消，尚未发送签到请求"));
+    const check = () => {
+      if (stopped) throw stopped;
+      guard();
+    };
+    signal?.addEventListener("abort", cancel, {
+      once: true
+    });
+    const work = async () => {
+      let lastError;
+      const headers = {
+        Accept: "application/json",
+        xtbz: "ykt",
+        "x-client": "h5"
+      };
+      for (const path of PROFILE_PATHS) {
+        check();
+        let httpStatus = 0;
+        try {
+          const response = await fetch(new URL(path, origin).href, {
+            credentials: "include",
+            cache: "no-store",
+            redirect: "error",
+            headers: headers,
+            signal: controller.signal
+          });
+          httpStatus = response.status;
+          check();
+          if (response.url && new URL(response.url, origin).origin !== origin) throw new CheckinError("当前账号资料响应跳转到了其他站点");
+          if (response.status === 401 || response.status === 403) throw new CheckinError("雨课堂登录已失效，请在官网重新登录", {
+            code: response.status,
+            status: response.status
+          });
+          if (!(response.status >= 200 && response.status < 300)) throw new CheckinError(`读取当前账号 HTTP ${response.status}`, {
+            status: response.status
+          });
+          const body = await response.text();
+          check();
+          const userId = parseCurrentUserResponse(body);
+          diag("checkin-identity-probe", {
+            endpoint: path,
+            httpStatus: response.status,
+            recognized: true
+          });
+          return {
+            userId: userId,
+            source: path
+          };
+        } catch (error) {
+          check();
+          lastError = error instanceof CheckinError ? error : new CheckinError("读取当前账号网络失败，尚未发送签到请求");
+          diag("checkin-identity-probe", {
+            endpoint: path,
+            httpStatus: httpStatus,
+            code: lastError.code,
+            recognized: false
+          });
+          if ([ 401, 403, 5e4 ].includes(lastError.code)) throw lastError;
+        }
       }
+      throw lastError;
     };
-  }
-  function parseCheckinResponse({status: status, body: body, headers: headers = "", lessonId: lessonId, channel: channel}) {
-    if (!(status >= 200 && status < 300)) throw new CheckinError(`签到请求 HTTP ${status}`, {
-      status: status,
-      unknown: !status || status >= 500
-    });
-    let json;
     try {
-      json = typeof body === "string" ? JSON.parse(body) : body;
-    } catch {
-      throw new CheckinError("签到响应无法解析，结果待核实", {
-        status: status,
-        unknown: true
-      });
+      timer = setTimeout(() => stop(new CheckinError("读取当前账号超时，尚未发送签到请求，请重试")), timeout);
+      return await Promise.race([ work(), stopPromise ]);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
     }
-    if (!json || typeof json !== "object" || ![ "number", "string" ].includes(typeof json.code) || String(json.code).trim() === "") throw new CheckinError("服务器未返回明确签到结果", {
-      status: status,
-      unknown: true
-    });
-    const code = Number(json.code);
-    if (code !== 0) {
-      const reason = code === 50070 ? "服务器仍要求动态二维码验证" : code === 5e4 || code === 401 ? "雨课堂登录已失效，请重新登录" : String(json.msg || json.message || "服务器拒绝签到").slice(0, 120);
-      throw new CheckinError(`${reason}（${json.code}）`, {
-        code: Number.isFinite(code) ? code : String(json.code),
-        status: status
-      });
-    }
-    const data = json.data ?? json.result;
-    if (json.success === false || data?.checkedIn === false || data?.isCheckedIn === false || data?.is_checked_in === false) throw new CheckinError("服务器未确认签到完成，结果待核实", {
-      status: status,
-      unknown: true
-    });
-    const token = data?.lessonToken;
-    if (typeof token !== "string" || !token.trim()) throw new CheckinError("服务器返回成功，但缺少课堂凭据，签到结果待核实", {
-      status: status,
-      unknown: true
-    });
-    const returnedLesson = data.lessonId ?? data.lesson_id;
-    if (returnedLesson != null && String(returnedLesson) !== String(lessonId)) throw new CheckinError("服务器返回了另一课堂的凭据", {
-      status: status,
-      unknown: true
-    });
-    const bearer = String(headers).match(/^set-auth\s*:\s*([^\r\n]*)/im)?.[1]?.trim() || "";
-    return {
-      token: token.trim(),
-      setAuth: bearer.replace(/^Bearer\s+/i, ""),
-      lessonId: String(lessonId),
-      channel: channel,
-      confirmed: true,
-      code: 0
-    };
   }
   const inFlight = new Map;
-  function currentUserId() {
-    return readCheckinCookies(document.cookie).user_id || gm.uw?.YktUser?.id || gm.uw?.__INITIAL_STATE__?.user?.userId || null;
-  }
   function changed(lessonId, phase, details = {}) {
     const state = repo.forLesson(lessonId).checkin;
     Object.assign(state, {
@@ -4856,7 +5004,7 @@
     if (!options.force && state.nextAttemptAt > Date.now()) return Promise.reject(new CheckinError(state.lastError || "请稍后重试签到", {
       code: state.code
     }));
-    if (!options.force && state.phase === "confirmed" && ctx.auth?.token && state.channel === channel && Date.now() - state.confirmedAt < 3e4) return Promise.resolve({
+    if (accountId !== "anonymous" && !options.force && state.phase === "confirmed" && ctx.auth?.token && state.channel === channel && Date.now() - state.confirmedAt < 3e4) return Promise.resolve({
       ...ctx.auth,
       confirmed: true,
       code: 0,
@@ -4864,6 +5012,7 @@
       channel: channel
     });
     const run = async () => {
+      let stage = "preflight", requestSent = false;
       const guard = () => {
         if (repo.accountId !== accountId) throw new CheckinError("账号已变化，签到请求已停止");
         options.guard?.();
@@ -4871,15 +5020,51 @@
       try {
         guard();
         if (channel === "app" && typeof window.GM_xmlhttpRequest !== "function") throw new CheckinError("当前脚本管理器未提供客户端请求能力，请启用 GM_xmlhttpRequest 或切换普通签到");
+        // Validate the destination and lesson before any identity lookup.
+                buildCheckinRequest({
+          origin: location.origin,
+          lessonId: id,
+          cookie: document.cookie,
+          channel: channel === "app" ? "web" : channel
+        });
+        const timeout = Math.max(1, Math.min(3e4, Number(options.timeout) || 12e3));
+        const started = Date.now(), remaining = () => Math.max(1, Math.min(timeout, timeout - (Date.now() - started)));
+        let identity;
+        if (channel === "app") {
+          stage = "identity";
+          changed(id, "identifying", {
+            channel: channel,
+            stage: stage,
+            code: null,
+            lastError: "",
+            nextAttemptAt: 0
+          });
+          diag("checkin-identity-start", {
+            lessonId: id,
+            channel: channel
+          });
+          identity = await resolveCurrentUserIdentity({
+            timeout: Math.min(6e3, remaining()),
+            signal: options.signal,
+            guard: guard
+          });
+          guard();
+          diag("checkin-identity-ready", {
+            lessonId: id,
+            source: identity.source
+          });
+        }
         const request = buildCheckinRequest({
           origin: location.origin,
           lessonId: id,
-          userId: currentUserId(),
+          userId: identity?.userId,
           cookie: document.cookie,
           channel: channel
         });
+        stage = "checkin";
         changed(id, "signing", {
           channel: channel,
+          stage: stage,
           code: null,
           lastError: "",
           nextAttemptAt: 0
@@ -4888,24 +5073,33 @@
           lessonId: id,
           channel: channel
         });
-        const timeout = Math.max(1, Math.min(3e4, Number(options.timeout) || 12e3));
+        const sendGuard = () => {
+          guard();
+          requestSent = true;
+        };
         const response = await (channel === "app" ? requestAppCheckin : requestWebCheckin)(request, {
-          timeout: timeout,
+          timeout: remaining(),
           signal: options.signal,
-          guard: guard
+          guard: sendGuard
         });
         if (repo.accountId !== accountId) throw new CheckinError("账号已变化，旧签到结果已丢弃");
-        const result = parseCheckinResponse({
-          ...response,
-          lessonId: id,
-          channel: channel
-        });
+        stage = "response";
+        const result = {
+          ...parseCheckinResponse({
+            ...response,
+            lessonId: id,
+            channel: channel
+          }),
+          userId: identity?.userId
+        };
         ctx.auth = {
           token: result.token,
-          setAuth: result.setAuth
+          setAuth: result.setAuth,
+          userId: result.userId
         };
         changed(id, "confirmed", {
           channel: channel,
+          stage: "confirmed",
           code: 0,
           confirmedAt: Date.now(),
           lastError: "",
@@ -4922,6 +5116,7 @@
           const phase = error.code === 50070 ? "refused" : error.unknown ? "unknown" : "failed";
           changed(id, phase, {
             channel: channel,
+            stage: stage,
             code: error.code ?? null,
             lastError: error.message,
             nextAttemptAt: Date.now() + (error.unknown ? 3e4 : 6e4)
@@ -4931,6 +5126,8 @@
             channel: channel,
             code: error.code ?? null,
             phase: phase,
+            stage: stage,
+            requestSent: requestSent,
             httpStatus: error.status || 0
           });
         } else Object.assign(ctx.checkin, {
@@ -5132,6 +5329,7 @@
       const title = create("div", lesson.courseName || lesson.classroomName || lesson.title || `课堂 ${id}`, "checkin-title");
       const status = create("p", {
         idle: "尚未签到",
+        identifying: "正在识别当前登录账号…",
         signing: "正在签到…",
         confirmed: "服务器已确认签到",
         refused: "动态码通道被服务器拒绝",
@@ -5143,7 +5341,7 @@
       const detail = create("p", state.lastError || (state.phase === "confirmed" ? `${state.channel === "app" ? "客户端" : "普通"}通道 · ${connection?.readyState === 1 ? "课堂连接已建立" : connection?.readyState === 0 ? "正在连接课堂" : "等待课堂连接"}` : ""), "checkin-detail");
       const button = create("button", state.phase === "confirmed" ? "重新签到并连接" : "立即签到");
       button.type = "button";
-      button.disabled = state.phase === "signing";
+      button.disabled = [ "identifying", "signing" ].includes(state.phase);
       button.onclick = async () => {
         button.disabled = true;
         try {
@@ -6625,7 +6823,8 @@
       if (options.automatic) repo.markLessonAutoJoined(lessonId);
       connectOrAttachLessonWS({
         lessonId: key(lessonId),
-        auth: result.token
+        auth: result.token,
+        userId: result.userId
       });
       return result;
     },
@@ -6943,7 +7142,7 @@
     window.WebSocket = MyWebSocket;
   }
   // ===== 主动为某个课堂建立/复用 WebSocket 连接 =====
-    function connectOrAttachLessonWS({lessonId: lessonId, auth: auth}) {
+    function connectOrAttachLessonWS({lessonId: lessonId, auth: auth, userId: userId}) {
     if (!lessonId || !auth) {
       console.warn("[雨课堂助手][WARN] 缺少 lessonId 或 auth，放弃建链");
       return null;
@@ -6958,7 +7157,7 @@
         const hello = {
           op: "hello",
           // userid 可选：尽力获取，获取不到也不阻断流程
-          userid: getUserIdSafe(),
+          userid: userId || getUserIdSafe(),
           role: "student",
           auth: auth,
           // 关键：lessonToken
@@ -7193,7 +7392,7 @@
     if (desktopStarted) return;
     desktopStarted = true;
     diag("boot", {
-      version: "1.22.2-beta.1",
+      version: "1.22.2-beta.2",
       readyState: INJECTED_READY_STATE,
       autoAnswer: !!ui.config.autoAnswer
     });
@@ -7201,10 +7400,10 @@
       // 控制台：__yktHelperDiag.download() 导出诊断日志
       (gm.uw || window).__yktHelperDiag = {
         dump: () => exportDiagnostics({
-          version: "1.22.2-beta.1"
+          version: "1.22.2-beta.2"
         }),
         download: () => downloadDiagnostics({
-          version: "1.22.2-beta.1"
+          version: "1.22.2-beta.2"
         }),
         clear: clearDiagnostics
       };

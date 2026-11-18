@@ -262,7 +262,7 @@ export const actions = {
     if (repo.accountId !== accountId) throw new Error('账号已变化，旧课堂连接已停止');
     try { options.guard?.(); } catch { return result; }
     if (options.automatic) repo.markLessonAutoJoined(lessonId);
-    connectOrAttachLessonWS({ lessonId: key(lessonId), auth: result.token });
+    connectOrAttachLessonWS({ lessonId: key(lessonId), auth: result.token, userId: result.userId });
     return result;
   },
   startAutoJoinLoop() {

@@ -157,7 +157,7 @@ MyWebSocket.addHandler((ws, url) => {
 }
 
 // ===== 主动为某个课堂建立/复用 WebSocket 连接 =====
-export function connectOrAttachLessonWS({ lessonId, auth }) {
+export function connectOrAttachLessonWS({ lessonId, auth, userId }) {
   if (!lessonId || !auth) {
     console.warn('[雨课堂助手][WARN] 缺少 lessonId 或 auth，放弃建链');
     return null;
@@ -177,7 +177,7 @@ export function connectOrAttachLessonWS({ lessonId, auth }) {
       const hello = {
         op: 'hello',
         // userid 可选：尽力获取，获取不到也不阻断流程
-        userid: getUserIdSafe(),
+        userid: userId || getUserIdSafe(),
         role: 'student',
         auth,              // 关键：lessonToken
         lessonid: lessonId // 关键：目标课堂

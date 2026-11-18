@@ -2,16 +2,18 @@
 
 课堂提醒、课件浏览、AI 辅助分析与可配置的作答流程。继承自 [ZaytsevZY/yuketang-helper-auto](https://github.com/ZaytsevZY/yuketang-helper-auto)，MIT 许可。
 
-当前分支：**`feat/dynamic-qr-checkin`**，测试版本 **1.22.2-beta.1**。源码入口为 `ykt-helper/src/index.js`。
+当前分支：**`feat/dynamic-qr-checkin`**，测试版本 **1.22.2-beta.2**。源码入口为 `ykt-helper/src/index.js`。
 
 本分支新增动态码课堂免扫码签到。协议依据、已实现功能和验证边界见 [动态码实施记录](docs/dynamic-qr-checkin.md)。
+
+beta.2 修复已登录网页缺少 `user_id` Cookie 时无法识别账号的问题：签到前会用当前登录态读取本人资料，显示识别进度，并在诊断中区分账号读取与签到请求阶段。
 
 1.22.1 修复了 1.22.0 的课件采集回归：服务器仅在请求 URL 提供课件编号时，助手也会正确载入幻灯片。升级后刷新课堂页即可重新采集；课件暂时只显示题目页时，可点“显示全部页面”。
 
 ## 安装
 
 1. 在 Chrome / Edge 安装 [Tampermonkey](https://www.tampermonkey.net/)，允许用户脚本运行。
-2. 在脚本管理器中导入本分支的 [ykt-helper-dynamic-qr.user.js](release/ykt-helper-dynamic-qr.user.js)。固定副本为 [ykt-helper-1222-beta1.user.js](release/ykt-helper-1222-beta1.user.js)。
+2. 在脚本管理器中导入本分支的 [ykt-helper-dynamic-qr.user.js](release/ykt-helper-dynamic-qr.user.js)。固定副本为 [ykt-helper-1222-beta2.user.js](release/ykt-helper-1222-beta2.user.js)。
 3. 登录雨课堂，在助手设置中填写自己的模型接口、API Key 和模型 ID。
 4. 打开工具栏的二维码图标，启用“动态码课堂免扫码签到”；需要自动运行时，再开启“开课后自动签到并进入课堂”。也可对当前课堂点击“立即签到”。
 5. 面板显示服务器确认、实际错误码与课堂连接状态。已有登录态失效时，先在官网重新登录。
@@ -76,7 +78,7 @@ npm ci
 npm test
 ```
 
-修改源码后运行 `npm run release` 同步发布副本。`npm test` 先构建实际安装产物，再运行模块测试和 JSDOM 组合回归。生成文件为 `ykt-helper/dist/ykt-helper-1222-beta1.user.js`，发布时同步到 `release/ykt-helper-1222-beta1.user.js` 和 `release/ykt-helper-dynamic-qr.user.js`。
+修改源码后运行 `npm run release` 同步发布副本。`npm test` 先构建实际安装产物，再运行模块测试和 JSDOM 组合回归。生成文件为 `ykt-helper/dist/ykt-helper-1222-beta2.user.js`，发布时同步到 `release/ykt-helper-1222-beta2.user.js` 和 `release/ykt-helper-dynamic-qr.user.js`。
 
 隔离测试不代表真实课堂全环境验收。服务器接口/改答权限、真实图片 CORS、Android/Tampermonkey、系统权限、后台冻结与模型答案正确率仍取决于实际环境。当前不提供服务器无人值守程序、手机号密码自动登录、整份考试试卷的通用提交。动态码签到通道已经实现，仍需要目标课堂的实际服务器验收。
 
